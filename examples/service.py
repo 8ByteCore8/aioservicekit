@@ -1,5 +1,5 @@
 import asyncio
-from src import AbscractService
+from aioservicekit import AbscractService
 
 
 class ExampleService(AbscractService):

@@ -1,5 +1,5 @@
 import asyncio
-from src import AbscractService
+from aioservicekit import AbscractService
 
 
 async def timeout(service: AbscractService, timeout: int):

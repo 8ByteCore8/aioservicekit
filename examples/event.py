@@ -1,5 +1,5 @@
 import asyncio
-from src import Event
+from aioservicekit import Event
 
 
 def create_callback(id: int):
