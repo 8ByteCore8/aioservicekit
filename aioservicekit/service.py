@@ -2,8 +2,10 @@ import asyncio
 from abc import ABC, abstractmethod
 from enum import IntEnum, auto
 import inspect
+
+from .group import TaskGroup
 from .events import on_shutdown, Event
-from typing import Any, Callable, Coroutine, Optional, Self, Set
+from typing import Any, Callable, Coroutine, Optional, Self
 
 
 class ServiceState(IntEnum):
@@ -13,7 +15,7 @@ class ServiceState(IntEnum):
     STOPED = auto()
 
 
-class AbscractService(ABC):
+class AbscractService(ABC, TaskGroup):
     """Abscract class for services"""
 
     __main: asyncio.Task = None
@@ -22,8 +24,6 @@ class AbscractService(ABC):
     """Service name"""
     __on_state_change: Event[Self, ServiceState] = Event()
     """Service state change event"""
-    __tasks: Set[asyncio.Task]
-    """Background tasks"""
     __waiter: asyncio.Event
     __state: ServiceState
     """Service state"""
@@ -46,20 +46,11 @@ class AbscractService(ABC):
     def name(self) -> str | None:
         return self.__name
 
-    def _create_task(
-        self, coro: Coroutine[Any, Any, None], *, name: Optional[str] = None
-    ) -> None:
-        """Run task in backgroud and add it ro set"""
-        task = asyncio.create_task(coro, name=name)
-        task.add_done_callback(lambda *args, **kwargs: self.__tasks.remove(task))
-        self.__tasks.add(task)
-
     def __init__(self, *, name: Optional[str] = None) -> None:
         """Create new service"""
         super().__init__()
         self.__name = name
         self.__state = ServiceState.STOPED
-        self.__tasks = set()
         self.__waiter = asyncio.Event()
 
     def __on_shutdown(self, *args, **kwargs):
@@ -108,8 +99,8 @@ class AbscractService(ABC):
             await self.__main
 
             # Wait backgroud tasks
-            if len(self.__tasks) > 0:
-                await asyncio.wait(self.__tasks)
+            TaskGroup.cancel(self)
+            await TaskGroup.wait(self)
 
             # Mark as stoped
             self.__main = None

@@ -1,6 +1,7 @@
 from .service import AbscractService, ServiceState
 from .events import Event, on_shutdown
 from .utils import safe_main
+from .group import TaskGroup
 from .chanels import Chanel
 
 
@@ -11,4 +12,5 @@ __all__ = [
     "AbscractService",
     "ServiceState",
     "Chanel",
+    "TaskGroup",
 ]
