@@ -1,8 +1,8 @@
 import asyncio
-from aioservicekit import AbscractService
+from aioservicekit import AbstractService
 
 
-class ExampleService(AbscractService):
+class ExampleService(AbstractService):
     """Simple service. Stopped on stop() call or shutdown event"""
 
     async def __work__(self):

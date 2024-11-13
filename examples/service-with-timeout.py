@@ -1,13 +1,13 @@
 import asyncio
-from aioservicekit import AbscractService
+from aioservicekit import AbstractService
 
 
-async def timeout(service: AbscractService, timeout: int):
+async def timeout(service: AbstractService, timeout: int):
     await asyncio.sleep(timeout)
     await service.stop()
 
 
-class TimeoutExampleService(AbscractService):
+class TimeoutExampleService(AbstractService):
     """Simple service. Stopped on stop() call or shutdown event or after 10 seconds"""
     
     def __start__(self):

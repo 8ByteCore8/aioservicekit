@@ -5,7 +5,7 @@ import inspect
 
 from .group import TaskGroup
 from .events import on_shutdown, Event
-from typing import Any, Callable, Coroutine, Optional, Self
+from typing import Any, Coroutine, Optional, Self
 
 
 class ServiceState(IntEnum):
@@ -15,14 +15,14 @@ class ServiceState(IntEnum):
     STOPED = auto()
 
 
-class AbscractService(ABC, TaskGroup):
+class AbstractService(ABC, TaskGroup):
     """Abscract class for services"""
 
-    __main: asyncio.Task = None
+    __main: Optional[asyncio.Task]
     """Main service process"""
-    __name: Optional[str] = None
+    __name: Optional[str]
     """Service name"""
-    __on_state_change: Event[Self, ServiceState] = Event()
+    on_state_change: Event[Self, ServiceState]
     """Service state change event"""
     __waiter: asyncio.Event
     __state: ServiceState
@@ -30,7 +30,7 @@ class AbscractService(ABC, TaskGroup):
 
     def __set_state(self, state: ServiceState):
         self.__state = state
-        return self.__on_state_change.emit(self, state)
+        return self.on_state_change.emit(self, state)
 
     @property
     def is_stoped(self) -> bool:
@@ -50,8 +50,10 @@ class AbscractService(ABC, TaskGroup):
         """Create new service"""
         super().__init__()
         self.__name = name
+        self.__main = None
         self.__state = ServiceState.STOPED
         self.__waiter = asyncio.Event()
+        self.on_state_change = Event()
 
     def __on_shutdown(self, *args, **kwargs):
         return self.stop()
@@ -112,16 +114,6 @@ class AbscractService(ABC, TaskGroup):
         if self.is_running:
             await self.stop()
             await self.start()
-
-    def subscribe(
-        self, callback: Callable[[Self, ServiceState], None | Coroutine[Any, Any, None]]
-    ):
-        """Subscribe to service events"""
-        self.__on_state_change.add_listener(callback)
-
-    def unsubscribe(self, callback: Callable[[Self], None | Coroutine[Any, Any, None]]):
-        """Unsubscribe from service events"""
-        self.__on_state_change.remove_listener(callback)
 
     @abstractmethod
     def __start__(self) -> Coroutine[Any, Any, None] | None:
