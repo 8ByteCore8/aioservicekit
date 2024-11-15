@@ -115,7 +115,6 @@ class AbstractService(ABC, TaskGroup):
             await self.stop()
             await self.start()
 
-    @abstractmethod
     def __start__(self) -> Coroutine[Any, Any, None] | None:
         """Startup initialisation"""
         pass
@@ -125,7 +124,6 @@ class AbstractService(ABC, TaskGroup):
         """Main service process"""
         pass
 
-    @abstractmethod
     def __stop__(self) -> Coroutine[Any, Any, None] | None:
         """Service stoping"""
         pass

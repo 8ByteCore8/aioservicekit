@@ -7,8 +7,8 @@ class TaskGroup:
     __uncanceliable_tasks: Set[asyncio.Task]
 
     def __init__(self):
-        self.__tasks = {}
-        self.__uncanceliable_tasks = {}
+        self.__tasks = set()
+        self.__uncanceliable_tasks = set()
 
     def create_task(self, coro: Awaitable, canceliable: bool = True):
         task = asyncio.create_task(coro)
