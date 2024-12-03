@@ -1,5 +1,5 @@
 import asyncio
-from typing import Generic, List, Optional, Self, TypeVar
+from typing import Generic, Optional, Self, TypeVar
 
 
 class ChanelCloused(Exception):
@@ -16,7 +16,7 @@ _T = TypeVar("T")
 
 
 class Chanel(Generic[_T]):
-    __customers: List["ChanelCustomer[_T]"]
+    __customers: list["ChanelCustomer[_T]"]
     __size: int
     __strict: bool
 

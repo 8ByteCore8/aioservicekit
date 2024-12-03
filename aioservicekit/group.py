@@ -1,10 +1,10 @@
 import asyncio
-from typing import Awaitable, Set
+from collections.abc import Awaitable
 
 
 class TaskGroup:
-    __tasks: Set[asyncio.Task]
-    __uncanceliable_tasks: Set[asyncio.Task]
+    __tasks: set[asyncio.Task]
+    __uncanceliable_tasks: set[asyncio.Task]
 
     def __init__(self):
         self.__tasks = set()

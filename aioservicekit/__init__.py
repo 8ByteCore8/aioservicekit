@@ -1,9 +1,8 @@
-from .service import AbstractService, ServiceState
-from .events import Event, on_shutdown
-from .utils import safe_main
-from .group import TaskGroup
 from .chanels import Chanel
-
+from .events import Event, on_shutdown
+from .group import TaskGroup
+from .service import AbstractService, ServiceState
+from .utils import safe_main
 
 __all__ = [
     "safe_main",

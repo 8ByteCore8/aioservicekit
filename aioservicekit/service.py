@@ -1,11 +1,12 @@
 import asyncio
-from abc import ABC, abstractmethod
-from enum import IntEnum, auto
 import inspect
+from abc import ABC, abstractmethod
+from collections.abc import Coroutine
+from enum import IntEnum, auto
+from typing import Any, Optional, Self
 
+from .events import Event, on_shutdown
 from .group import TaskGroup
-from .events import on_shutdown, Event
-from typing import Any, Coroutine, Optional, Self
 
 
 class ServiceState(IntEnum):

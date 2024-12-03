@@ -1,14 +1,13 @@
 import asyncio
 import inspect
 import signal
+from collections.abc import Coroutine
 from typing import (
     Any,
     Callable,
-    Coroutine,
     Generic,
     Optional,
     Self,
-    Set,
     TypeVarTuple,
 )
 
@@ -26,7 +25,7 @@ class EventClosedError(EventError):
 
 class Event(Generic[*_ARGS]):
     __closed: bool = False
-    __listeners: Set[Callable[[*_ARGS], None | Coroutine[Any, Any, None]]]
+    __listeners: set[Callable[[*_ARGS], None | Coroutine[Any, Any, None]]]
 
     def __enter__(self) -> Self:
         return self
