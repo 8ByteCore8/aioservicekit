@@ -12,7 +12,7 @@ extras_test = [
 
 setup(
     name="aioservicekit",
-    version="0.4.0",
+    version="0.4.1",
     keywords=[
         "async",
         "asyncio",
@@ -24,6 +24,7 @@ setup(
     long_description_content_type="text/markdown",
     license=license,
     author="Bohdan Kushnir",
+    requires=["exceptiongroup"],
     extras_require={
         "test": extras_test,
     },
