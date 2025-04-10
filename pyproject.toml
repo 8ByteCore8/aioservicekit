@@ -3,3 +3,5 @@ build-backend = "setuptools.build_meta"
 requires = ["setuptools", "wheel"]
 
 [tool.setuptools_scm]
+
+requires-python=">=3.11"

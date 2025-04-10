@@ -12,7 +12,7 @@ extras_test = [
 
 setup(
     name="aioservicekit",
-    version="0.3.0",
+    version="0.4.0",
     keywords=[
         "async",
         "asyncio",
@@ -36,13 +36,11 @@ setup(
         "Source": "https://github.com/8ByteCore8/aioservicekit",
     },
     packages=find_packages(exclude=["tests", "examples"]),
-    python_requires=">=3.6",
+    python_requires=">=3.11",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Apache Software License",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
