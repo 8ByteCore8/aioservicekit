@@ -39,9 +39,26 @@ class Chanel(Generic[_T]):
     data sent via the `send` method to all connected customers.
     """
 
-    __customers__: list["ChanelCustomer[_T]"]
-    __size__: int
-    __strict__: bool
+    _customers_: list["ChanelCustomer[_T]"]
+    _size_: int
+    _strict_: bool
+
+    def __init__(self, size: int = 0, strict: bool = True) -> None:
+        """
+        Initialize a new Chanel instance.
+
+        Args:
+            size (int): Default buffer size for new customers connected to this
+                channel. Defaults to 0 (unbounded).
+            strict (bool): If True, calling `send` on a channel with no
+                customers raises `ChanelClousedError`. Defaults to True.
+
+        Returns:
+            None
+        """
+        self._customers_ = []
+        self._size_ = size
+        self._strict_ = strict
 
     async def send(self, data: _T) -> None:
         """
@@ -60,28 +77,11 @@ class Chanel(Generic[_T]):
         Returns:
             None
         """
-        if self.__strict__ and self.is_closed:
+        if self._strict_ and self.is_closed:
             raise ChanelClousedError()
         async with asyncio.TaskGroup() as group:
-            for customer in self.__customers__:
-                group.create_task(customer._send(data))
-
-    def __init__(self, size: int = 0, strict: bool = True) -> None:
-        """
-        Initialize a new Chanel instance.
-
-        Args:
-            size (int): Default buffer size for new customers connected to this
-                channel. Defaults to 0 (unbounded).
-            strict (bool): If True, calling `send` on a channel with no
-                customers raises `ChanelClousedError`. Defaults to True.
-
-        Returns:
-            None
-        """
-        self.__customers__ = []
-        self.__size__ = size
-        self.__strict__ = strict
+            for customer in self._customers_:
+                group.create_task(customer._send_(data))
 
     @property
     def is_closed(self) -> bool:
@@ -91,7 +91,7 @@ class Chanel(Generic[_T]):
         Returns:
             bool: True if there are no customers, False otherwise.
         """
-        return len(self.__customers__) == 0
+        return len(self._customers_) == 0
 
     def clone(self) -> "ClonnedChanel[_T]":
         """
@@ -116,9 +116,9 @@ class Chanel(Generic[_T]):
         Returns:
             ChanelCustomer[_T]: The newly created and connected customer instance.
         """
-        customer_size = self.__size__ if size is None else size
+        customer_size = self._size_ if size is None else size
         customer = ChanelCustomer(self, size=customer_size)
-        self.__customers__.append(customer)
+        self._customers_.append(customer)
         return customer
 
     def disconnect(self, customer: "ChanelCustomer[_T]") -> None:
@@ -136,7 +136,7 @@ class Chanel(Generic[_T]):
         """
         # Use a try-except block to avoid ValueError if customer is already removed
         try:
-            self.__customers__.remove(customer)
+            self._customers_.remove(customer)
         except ValueError:
             pass  # Customer already disconnected, ignore.
 
@@ -150,9 +150,9 @@ class ChanelCustomer(Generic[_T]):
     to consume data.
     """
 
-    __buffer__: asyncio.Queue[_T]
-    __chanel__: Chanel[_T]
-    __cloused__: bool
+    _buffer_: asyncio.Queue[_T]
+    _chanel_: Chanel[_T]
+    _cloused_: bool
 
     def __init__(self, chanel: "Chanel[_T]", size: int) -> None:
         """
@@ -167,74 +167,9 @@ class ChanelCustomer(Generic[_T]):
             None
         """
         super().__init__()
-        self.__buffer__ = asyncio.Queue(size)
-        self.__chanel__ = chanel
-        self.__cloused__ = False
-
-    async def _send(self, data: _T) -> None:
-        """
-        Internal method to add data received from the channel to the buffer.
-
-        If the customer is not closed, it attempts to put the data into the
-        queue without waiting. If the queue is full, it waits until space is
-        available. This method is typically called by the `Chanel.send` method.
-
-        Args:
-            data (_T): The data item received from the channel.
-
-        Returns:
-            None
-        """
-        if not self.__cloused__:
-            try:
-                # Try non-blocking put first for performance
-                self.__buffer__.put_nowait(data)
-            except asyncio.QueueFull:
-                # If full, wait for space
-                await self.__buffer__.put(data)
-
-    def reset(self) -> None:
-        """
-        Clear all items currently in the customer's buffer.
-
-        Discards any unread data in the queue.
-
-        Returns:
-            None
-        """
-        try:
-            while True:
-                self.__buffer__.get_nowait()
-        except asyncio.QueueEmpty:
-            pass  # Buffer is now empty
-
-    def clone(self) -> "ChanelCustomer[_T]":
-        """
-        Create a new customer connected to the same channel.
-
-        This is equivalent to calling `chanel.connect()` with the same buffer size
-        as this customer. The new customer will have its own independent buffer.
-
-        Returns:
-            ChanelCustomer[_T]: A new customer instance connected to the same channel.
-        """
-        return self.__chanel__.connect(size=self.__buffer__.maxsize)
-
-    def close(self) -> None:
-        """
-        Close the customer connection.
-
-        Marks the customer as closed, disconnects it from the channel (so it
-        stops receiving new data), and resets (clears) its buffer. Attempts
-        to read from a closed, empty customer will raise `ChanelCustomerClousedError`.
-
-        Returns:
-            None
-        """
-        if not self.__cloused__:
-            self.__cloused__ = True
-            self.__chanel__.disconnect(self)
-            self.reset()
+        self._buffer_ = asyncio.Queue(size)
+        self._chanel_ = chanel
+        self._cloused_ = False
 
     def __aiter__(self) -> Self:
         """
@@ -246,39 +181,6 @@ class ChanelCustomer(Generic[_T]):
             Self: The instance itself.
         """
         return self
-
-    async def read(self) -> _T:
-        """
-        Asynchronously read the next item from the customer's buffer.
-
-        Waits if the buffer is empty. If the customer is closed and the
-        buffer becomes empty, raises `ChanelCustomerClousedError`.
-
-        Raises:
-            ChanelCustomerClousedError: If the customer is closed and the buffer
-                is empty.
-
-        Returns:
-            _T: The next data item from the buffer.
-        """
-        if self.__cloused__ and self.__buffer__.empty():
-            raise ChanelCustomerClousedError()
-
-        try:
-            # Try non-blocking get first
-            return self.__buffer__.get_nowait()
-        except asyncio.QueueEmpty:
-            # If empty, wait for an item
-            # This task might be cancelled if the customer is closed
-            # while waiting. `get()` handles this gracefully.
-            item = await self.__buffer__.get()
-            # Need to check again after waiting, in case it was closed
-            # and the queue was emptied *before* this item was received.
-            # However, the common case is getting an item. A more robust
-            # check might involve listening for a separate close event,
-            # but relying on Queue behavior and the __anext__ exception
-            # handling is typical.
-            return item
 
     async def __anext__(self) -> _T:
         """
@@ -300,6 +202,104 @@ class ChanelCustomer(Generic[_T]):
             # Convert the custom error to StopAsyncIteration for protocol compliance
             raise StopAsyncIteration() from err
 
+    async def _send_(self, data: _T) -> None:
+        """
+        Internal method to add data received from the channel to the buffer.
+
+        If the customer is not closed, it attempts to put the data into the
+        queue without waiting. If the queue is full, it waits until space is
+        available. This method is typically called by the `Chanel.send` method.
+
+        Args:
+            data (_T): The data item received from the channel.
+
+        Returns:
+            None
+        """
+        if not self._cloused_:
+            try:
+                # Try non-blocking put first for performance
+                self._buffer_.put_nowait(data)
+            except asyncio.QueueFull:
+                # If full, wait for space
+                await self._buffer_.put(data)
+
+    def reset(self) -> None:
+        """
+        Clear all items currently in the customer's buffer.
+
+        Discards any unread data in the queue.
+
+        Returns:
+            None
+        """
+        try:
+            while True:
+                self._buffer_.get_nowait()
+        except asyncio.QueueEmpty:
+            pass  # Buffer is now empty
+
+    def clone(self) -> "ChanelCustomer[_T]":
+        """
+        Create a new customer connected to the same channel.
+
+        This is equivalent to calling `chanel.connect()` with the same buffer size
+        as this customer. The new customer will have its own independent buffer.
+
+        Returns:
+            ChanelCustomer[_T]: A new customer instance connected to the same channel.
+        """
+        return self._chanel_.connect(size=self._buffer_.maxsize)
+
+    def close(self) -> None:
+        """
+        Close the customer connection.
+
+        Marks the customer as closed, disconnects it from the channel (so it
+        stops receiving new data), and resets (clears) its buffer. Attempts
+        to read from a closed, empty customer will raise `ChanelCustomerClousedError`.
+
+        Returns:
+            None
+        """
+        if not self._cloused_:
+            self._cloused_ = True
+            self._chanel_.disconnect(self)
+            self.reset()
+
+    async def read(self) -> _T:
+        """
+        Asynchronously read the next item from the customer's buffer.
+
+        Waits if the buffer is empty. If the customer is closed and the
+        buffer becomes empty, raises `ChanelCustomerClousedError`.
+
+        Raises:
+            ChanelCustomerClousedError: If the customer is closed and the buffer
+                is empty.
+
+        Returns:
+            _T: The next data item from the buffer.
+        """
+        if self._cloused_ and self._buffer_.empty():
+            raise ChanelCustomerClousedError()
+
+        try:
+            # Try non-blocking get first
+            return self._buffer_.get_nowait()
+        except asyncio.QueueEmpty:
+            # If empty, wait for an item
+            # This task might be cancelled if the customer is closed
+            # while waiting. `get()` handles this gracefully.
+            item = await self._buffer_.get()
+            # Need to check again after waiting, in case it was closed
+            # and the queue was emptied *before* this item was received.
+            # However, the common case is getting an item. A more robust
+            # check might involve listening for a separate close event,
+            # but relying on Queue behavior and the __anext__ exception
+            # handling is typical.
+            return item
+
 
 class ClonnedChanel(Generic[_T]):
     """
@@ -310,7 +310,7 @@ class ClonnedChanel(Generic[_T]):
     Useful for passing channel write/connect capabilities around.
     """
 
-    __chanel__: Chanel[_T]
+    _chanel_: Chanel[_T]
 
     def __init__(self, chanel: Chanel[_T]) -> None:
         """
@@ -323,7 +323,7 @@ class ClonnedChanel(Generic[_T]):
             None
         """
         super().__init__()
-        self.__chanel__ = chanel
+        self._chanel_ = chanel
 
     async def send(self, data: _T) -> None:
         """
@@ -338,7 +338,7 @@ class ClonnedChanel(Generic[_T]):
             None: Returns the result of the underlying `chanel.send` call.
         """
         # Ensure send is awaitable if the original is
-        await self.__chanel__.send(data)
+        await self._chanel_.send(data)
 
     def clone(self) -> "ClonnedChanel[_T]":
         """
@@ -350,7 +350,7 @@ class ClonnedChanel(Generic[_T]):
             ClonnedChanel[_T]: A new clone handle pointing to the same original channel.
         """
         # The original clone method returns ClonnedChanel, so this is correct.
-        return self.__chanel__.clone()
+        return self._chanel_.clone()
 
     def connect(self, *, size: Optional[int] = None) -> "ChanelCustomer[_T]":
         """
@@ -365,4 +365,4 @@ class ClonnedChanel(Generic[_T]):
         Returns:
             ChanelCustomer[_T]: The new customer connected to the original channel.
         """
-        return self.__chanel__.connect(size=size)
+        return self._chanel_.connect(size=size)

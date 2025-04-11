@@ -2,6 +2,7 @@ import asyncio
 import sys
 from collections.abc import Coroutine
 from contextvars import Context
+from inspect import Traceback
 from typing import Any, Optional, Self
 
 from aioservicekit.events import Event
@@ -31,11 +32,11 @@ class TaskGroup:
         Args:
             error_tolerance (bool): Whether to tolerate errors and continue execution. Defaults to False.
         """
-        self.__tasks__ = set()
-        self.__uncanceliable_tasks__ = set()
-        self.__errors__ = []
+        self._tasks_ = set()
+        self._uncanceliable_tasks_ = set()
+        self._errors_ = []
         self.on_error = Event()
-        self.__error_tolerance__ = error_tolerance
+        self._error_tolerance_ = error_tolerance
 
     async def __aenter__(self) -> Self:
         """
@@ -46,7 +47,9 @@ class TaskGroup:
         """
         return self
 
-    async def __aexit__(self, et, exc, tb) -> None:
+    async def __aexit__(
+        self, et: type[Exception], exc: Exception, tb: Traceback
+    ) -> None:
         """
         Exit the TaskGroup context and handle any errors that occurred during execution.
 
@@ -67,7 +70,7 @@ class TaskGroup:
         """
         Reset the error list.
         """
-        self.__errors__ = []
+        self._errors_ = []
 
     @property
     def error(self) -> list[BaseException]:
@@ -77,26 +80,26 @@ class TaskGroup:
         Returns:
             list[BaseException]: A list of BaseException instances.
         """
-        return [*self.__errors__]
+        return [*self._errors_]
 
-    def __on_task_done__(self, task: asyncio.Task) -> None:
+    def _on_task_done_(self, task: asyncio.Task) -> None:
         """
         Callback for when a task is done.
 
         Args:
             task (asyncio.Task): The completed task instance.
         """
-        self.__tasks__.discard(task)
-        self.__uncanceliable_tasks__.discard(task)
+        self._tasks_.discard(task)
+        self._uncanceliable_tasks_.discard(task)
 
         if (error := task.exception()) is not None and not isinstance(
             error, asyncio.CancelledError
         ):
-            if not self.__error_tolerance__:
-                self.__errors__.append(error)
+            if not self._error_tolerance_:
+                self._errors_.append(error)
             asyncio.create_task(self.on_error.emit(error))
 
-            if not self.__error_tolerance__:
+            if not self._error_tolerance_:
                 self.cancel()
 
     def create_task(
@@ -120,12 +123,12 @@ class TaskGroup:
             asyncio.Task: The created task instance.
         """
         task = asyncio.create_task(coro, name=name, context=context)
-        task.add_done_callback(self.__on_task_done__)
+        task.add_done_callback(self._on_task_done_)
 
         if canceliable:
-            self.__tasks__.add(task)
+            self._tasks_.add(task)
         else:
-            self.__uncanceliable_tasks__.add(task)
+            self._uncanceliable_tasks_.add(task)
 
         try:
             return task
@@ -138,7 +141,7 @@ class TaskGroup:
         """
         Cancel all tasks in the group.
         """
-        for task in self.__tasks__:
+        for task in self._tasks_:
             if not task.done():
                 task.cancel()
 
@@ -148,11 +151,11 @@ class TaskGroup:
 
         If an error occurred during execution and error tolerance is disabled, a BaseExceptionGroup will be raised.
         """
-        if all_tasks := set([*self.__uncanceliable_tasks__, *self.__tasks__]):
+        if all_tasks := set([*self._uncanceliable_tasks_, *self._tasks_]):
             await asyncio.wait(all_tasks)
 
-        if self.__errors__ and not self.__error_tolerance__:
+        if self._errors_ and not self._error_tolerance_:
             raise BaseExceptionGroup(
                 "unhandled errors in a TaskGroup",
-                self.__errors__,
+                self._errors_,
             )

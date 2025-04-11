@@ -22,17 +22,7 @@ class Task(AbstractService):
     method to define the actual work to be performed.
     """
 
-    __interval__: float
-
-    @property
-    def interval(self) -> float:
-        """
-        The interval in seconds between task executions.
-
-        Returns:
-            float: The configured interval time.
-        """
-        return self.__interval__
+    _interval_: float
 
     def __init__(self, interval: float, *, name: Optional[str] = None) -> None:
         """
@@ -45,9 +35,19 @@ class Task(AbstractService):
                                   and identification. Defaults to None.
         """
         super().__init__(name=name)
-        self.__interval__ = interval
+        self._interval_ = interval
 
-    async def __work__(self) -> None:
+    @property
+    def interval(self) -> float:
+        """
+        The interval in seconds between task executions.
+
+        Returns:
+            float: The configured interval time.
+        """
+        return self._interval_
+
+    async def _work_(self) -> None:
         """
         The main work loop for the task.
 
@@ -60,7 +60,7 @@ class Task(AbstractService):
         """
         try:
             async with asyncio.TaskGroup() as tasks:
-                tasks.create_task(self.__task__())
+                tasks.create_task(self._task_())
                 # Sleep concurrently with the task execution to ensure the interval
                 # starts roughly when the task starts, not after it finishes.
                 # If the task finishes early, the sleep continues.
@@ -73,15 +73,15 @@ class Task(AbstractService):
                 for err in err_group.exceptions:
                     error_tasks.create_task(self.on_error.emit(err))
             # Wait for the interval after handling errors before the next cycle
-            await asyncio.sleep(self.__interval__)
+            await asyncio.sleep(self._interval_)
         except BaseException as err:
             # Handle single exceptions (e.g., from __task__ directly)
             await self.on_error.emit(err)
             # Wait for the interval after handling the error before the next cycle
-            await asyncio.sleep(self.__interval__)
+            await asyncio.sleep(self._interval_)
 
     @abstractmethod
-    def __task__(self) -> Coroutine[Any, Any, None]:
+    def _task_(self) -> Coroutine[Any, Any, None]:
         """
         The core task logic to be executed periodically.
 
@@ -104,7 +104,7 @@ class TaskFn(Task):
     avoiding the need to subclass `Task` explicitly for simple cases.
     """
 
-    __task_fn__: Callable[[], Coroutine[Any, Any, None]]
+    _task_fn_: Callable[[], Coroutine[Any, Any, None]]
 
     def __init__(
         self,
@@ -125,9 +125,9 @@ class TaskFn(Task):
                                   and identification. Defaults to None.
         """
         super().__init__(interval, name=name)
-        self.__task_fn__ = fn
+        self._task_fn_ = fn
 
-    def __task__(self) -> Coroutine[Any, Any, None]:
+    def _task_(self) -> Coroutine[Any, Any, None]:
         """
         Executes the wrapped coroutine function.
 
@@ -137,7 +137,7 @@ class TaskFn(Task):
         Returns:
             Coroutine[Any, Any, None]: The coroutine returned by the wrapped function.
         """
-        return self.__task_fn__()
+        return self._task_fn_()
 
 
 def task(

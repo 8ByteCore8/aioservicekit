@@ -27,56 +27,21 @@ class AbstractService(ABC):
     and task management capabilities for background operations.
     """
 
-    __main__: Optional[asyncio.Task]
+    _main_: Optional[asyncio.Task]
     """Main service process task."""
-    __name__: str
+    _name_: str
     """Service name."""
-    __waiter__: asyncio.Event
+    _waiter_: asyncio.Event
     """Event used to signal service stop completion."""
-    __state__: ServiceState
+    _state_: ServiceState
     """Current state of the service."""
-    __tasks__: TaskGroup
+    _tasks_: TaskGroup
     """Task group for managing background tasks within the service."""
 
     on_state_change: Event[ServiceState]
     """Event triggered when the service state changes."""
     on_error: Event[BaseException]
     """Event triggered when an unhandled exception occurs in a background task."""
-
-    def __set_state__(self, state: ServiceState):
-        """Internal method to update the service state and emit the change event."""
-        self.__state__ = state
-        return self.on_state_change.emit(state)
-
-    @property
-    def is_stoped(self) -> bool:
-        """
-        Check if the service is currently stopped.
-
-        Returns:
-            bool: True if the service state is STOPED, False otherwise.
-        """
-        return self.__state__ == ServiceState.STOPED
-
-    @property
-    def is_running(self) -> bool:
-        """
-        Check if the service is currently running.
-
-        Returns:
-            bool: True if the service state is RUNNING, False otherwise.
-        """
-        return self.__state__ == ServiceState.RUNNING
-
-    @property
-    def name(self) -> str | None:
-        """
-        Get the name of the service.
-
-        Returns:
-            str | None: The assigned name of the service, or the class name if not provided.
-        """
-        return self.__name__
 
     def __init__(self, *, name: Optional[str] = None) -> None:
         """
@@ -89,16 +54,51 @@ class AbstractService(ABC):
         super().__init__()
 
         self.__name__ = name or self.__class__.__name__
-        self.__main__ = None
-        self.__state__ = ServiceState.STOPED
-        self.__waiter__ = asyncio.Event()
-        self.__tasks__ = TaskGroup(error_tolerance=True)
-        self.on_error = self.__tasks__.on_error
+        self._main_ = None
+        self._state_ = ServiceState.STOPED
+        self._waiter_ = asyncio.Event()
+        self._tasks_ = TaskGroup(error_tolerance=True)
+        self.on_error = self._tasks_.on_error
         self.on_state_change = Event()
 
-    def __on_shutdown__(self, *args, **kwargs):
+    def _set_state_(self, state: ServiceState):
+        """Internal method to update the service state and emit the change event."""
+        self._state_ = state
+        return self.on_state_change.emit(state)
+
+    def _on_shutdown_(self, *args, **kwargs):
         """Internal handler called on application shutdown to stop the service."""
         return self.stop()
+
+    @property
+    def is_stoped(self) -> bool:
+        """
+        Check if the service is currently stopped.
+
+        Returns:
+            bool: True if the service state is STOPED, False otherwise.
+        """
+        return self._state_ == ServiceState.STOPED
+
+    @property
+    def is_running(self) -> bool:
+        """
+        Check if the service is currently running.
+
+        Returns:
+            bool: True if the service state is RUNNING, False otherwise.
+        """
+        return self._state_ == ServiceState.RUNNING
+
+    @property
+    def name(self) -> str | None:
+        """
+        Get the name of the service.
+
+        Returns:
+            str | None: The assigned name of the service, or the class name if not provided.
+        """
+        return self.__name__
 
     def create_task(
         self,
@@ -121,7 +121,7 @@ class AbstractService(ABC):
         Returns:
             asyncio.Task: The created asyncio Task object.
         """
-        return self.__tasks__.create_task(
+        return self._tasks_.create_task(
             coro, name=name, context=context, canceliable=canceliable
         )
 
@@ -135,25 +135,25 @@ class AbstractService(ABC):
         Does nothing if the service is not currently STOPED.
         """
         if self.is_stoped:
-            self.__tasks__.reset_errors()
-            self.__waiter__.clear()
-            await self.__set_state__(ServiceState.STARTING)
+            self._tasks_.reset_errors()
+            self._waiter_.clear()
+            await self._set_state_(ServiceState.STARTING)
             # Do start
-            start_hook = self.__on_start__()
+            start_hook = self._on_start_()
             if inspect.isawaitable(start_hook):
                 await start_hook
 
             # Subscribe to shutdown event
-            on_shutdown().add_listener(self.__on_shutdown__)
+            on_shutdown().add_listener(self._on_shutdown_)
 
             # Emit service start event
-            await self.__set_state__(ServiceState.RUNNING)
+            await self._set_state_(ServiceState.RUNNING)
 
             async def __work_wrapper__(self: Self):
                 """Internal wrapper to run __work__ and handle errors."""
-                while self.__state__ == ServiceState.RUNNING:
+                while self._state_ == ServiceState.RUNNING:
                     try:
-                        await self.__work__()
+                        await self._work_()
                     except asyncio.CancelledError:
                         # Expected cancellation when stopping
                         break
@@ -165,7 +165,7 @@ class AbstractService(ABC):
                     await asyncio.sleep(0.01)
 
             # Run main process
-            self.__main__ = asyncio.create_task(
+            self._main_ = asyncio.create_task(
                 __work_wrapper__(self), name=f"{self.__name__}-main"
             )
 
@@ -176,8 +176,8 @@ class AbstractService(ABC):
         Blocks until the service transitions to the STOPED state.
         If the service is not running, returns immediately.
         """
-        if self.is_running or self.__state__ == ServiceState.STOPING:
-            await self.__waiter__.wait()
+        if self.is_running or self._state_ == ServiceState.STOPING:
+            await self._waiter_.wait()
 
     async def stop(self) -> None:
         """
@@ -191,27 +191,27 @@ class AbstractService(ABC):
         Does nothing if the service is not currently RUNNING.
         """
         if self.is_running:
-            await self.__set_state__(ServiceState.STOPING)
+            await self._set_state_(ServiceState.STOPING)
 
             # Unsubscribe from shutdown event
             _on_shutdown = on_shutdown()
-            _on_shutdown.remove_listener(self.__on_shutdown__)
+            _on_shutdown.remove_listener(self._on_shutdown_)
 
             # Cancel main task first
-            if self.__main__ is not None and not self.__main__.done():
-                self.__main__.cancel()
+            if self._main_ is not None and not self._main_.done():
+                self._main_.cancel()
                 try:
                     # Give the main task a chance to handle cancellation
-                    await asyncio.wait_for(self.__main__, timeout=None)
+                    await asyncio.wait_for(self._main_, timeout=None)
                 except asyncio.CancelledError:
                     pass  # Expected cancellation
                 except Exception as err:
                     # Log or handle error during main task cancellation/cleanup
                     await self.on_error.emit(err)
-            self.__main__ = None
+            self._main_ = None
 
             # Execute stop hook
-            stop_hook = self.__on_stop__()
+            stop_hook = self._on_stop_()
             if inspect.isawaitable(stop_hook):
                 try:
                     await stop_hook
@@ -220,14 +220,14 @@ class AbstractService(ABC):
                     await self.on_error.emit(err)
 
             # Cancel and wait for background tasks
-            self.__tasks__.cancel()
+            self._tasks_.cancel()
             await (
-                self.__tasks__.wait()
+                self._tasks_.wait()
             )  # TaskGroup handles errors internally and emits via on_error
 
             # Mark as stopped
-            await self.__set_state__(ServiceState.STOPED)
-            self.__waiter__.set()  # Signal waiters
+            await self._set_state_(ServiceState.STOPED)
+            self._waiter_.set()  # Signal waiters
 
     async def restart(self) -> None:
         """
@@ -238,7 +238,7 @@ class AbstractService(ABC):
         await self.stop()
         await self.start()
 
-    def __on_start__(self) -> Coroutine[Any, Any, None] | None:
+    def _on_start_(self) -> Coroutine[Any, Any, None] | None:
         """
         Optional hook executed during the service startup phase.
 
@@ -253,7 +253,7 @@ class AbstractService(ABC):
         return None
 
     @abstractmethod
-    def __work__(self) -> Coroutine[Any, Any, None]:
+    def _work_(self) -> Coroutine[Any, Any, None]:
         """
         Main service logic execution loop.
 
@@ -271,7 +271,7 @@ class AbstractService(ABC):
         """
         pass
 
-    def __on_stop__(self) -> Coroutine[Any, Any, None] | None:
+    def _on_stop_(self) -> Coroutine[Any, Any, None] | None:
         """
         Optional hook executed during the service stopping phase.
 
@@ -296,7 +296,7 @@ class ServiceFn(AbstractService):
     needing to define a full class.
     """
 
-    __work_fn__: Callable[[], Coroutine[Any, Any, None]]
+    _work_fn_: Callable[[], Coroutine[Any, Any, None]]
 
     def __init__(
         self, fn: Callable[[], Coroutine[Any, Any, None]], *, name: Optional[str] = None
@@ -312,9 +312,9 @@ class ServiceFn(AbstractService):
                                   is used.
         """
         super().__init__(name=name or fn.__name__)
-        self.__work_fn__ = fn
+        self._work_fn_ = fn
 
-    def __work__(self) -> Coroutine[Any, Any, None]:
+    def _work_(self) -> Coroutine[Any, Any, None]:
         """
         Execute one cycle of the service's work by calling the wrapped function.
 
@@ -325,7 +325,7 @@ class ServiceFn(AbstractService):
             Coroutine[Any, Any, None]: An awaitable representing the execution
                                        of the wrapped function.
         """
-        return self.__work_fn__()
+        return self._work_fn_()
 
 
 def service(

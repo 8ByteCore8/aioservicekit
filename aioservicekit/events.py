@@ -7,10 +7,12 @@ from typing import (
     Callable,
     Generic,
     Optional,
+    ParamSpec,
     Self,
-    TypeVarTuple,
     cast,
 )
+
+_P = ParamSpec("_P")
 
 __all__ = [
     "EventError",
@@ -18,8 +20,6 @@ __all__ = [
     "Event",
     "on_shutdown",
 ]
-
-_ARGS = TypeVarTuple("_ARGS")
 
 
 class EventError(Exception):
@@ -34,7 +34,7 @@ class EventClosedError(EventError):
     pass
 
 
-class Event(Generic[*_ARGS]):
+class Event(Generic[_P]):
     """
     Event class that allows registering listeners and emitting events.
 
@@ -45,8 +45,14 @@ class Event(Generic[*_ARGS]):
         *_ARGS: The argument types that listeners registered to this event will accept.
     """
 
-    __closed__: bool = False
-    __listeners__: set[Callable[[*_ARGS], None | Coroutine[Any, Any, None]]]
+    _closed_: bool = False
+    _listeners_: set[Callable[_P, None | Coroutine[Any, Any, None]]]
+
+    def __init__(self) -> None:
+        """
+        Initialize a new Event instance.
+        """
+        self._listeners_ = set()
 
     def __enter__(self) -> Self:
         """
@@ -63,14 +69,19 @@ class Event(Generic[*_ARGS]):
         """
         self.close()
 
-    def __init__(self) -> None:
-        """
-        Initialize a new Event instance.
-        """
-        self.__listeners__ = set()
+    async def _emit_(self, *args: _P.args, **kwargs: _P.kwargs):
+        """Internal method to execute listeners."""
+        async with asyncio.TaskGroup() as group:
+            for listener in self._listeners_:
+                try:
+                    res = listener(*args, **kwargs)
+                    if inspect.isawaitable(res):
+                        group.create_task(res)
+                except Exception:
+                    pass
 
     def add_listener(
-        self, listener: Callable[[*_ARGS], None | Coroutine[Any, Any, None]]
+        self, listener: Callable[_P, None | Coroutine[Any, Any, None]]
     ) -> None:
         """
         Subscribe a listener callable to this event.
@@ -85,14 +96,14 @@ class Event(Generic[*_ARGS]):
         Raises:
             EventClosedError: If the event has already been closed.
         """
-        if self.__closed__:
+        if self._closed_:
             raise EventClosedError()
 
-        if listener not in self.__listeners__ and callable(listener):
-            self.__listeners__.add(listener)
+        if listener not in self._listeners_ and callable(listener):
+            self._listeners_.add(listener)
 
     def remove_listener(
-        self, listener: Callable[[*_ARGS], None | Coroutine[Any, Any, None]]
+        self, listener: Callable[_P, None | Coroutine[Any, Any, None]]
     ) -> None:
         """
         Unsubscribe a listener callable from this event.
@@ -104,24 +115,13 @@ class Event(Generic[*_ARGS]):
         Raises:
             EventClosedError: If the event has already been closed.
         """
-        if self.__closed__:
+        if self._closed_:
             raise EventClosedError()
 
-        if listener in self.__listeners__:
-            self.__listeners__.remove(listener)
+        if listener in self._listeners_:
+            self._listeners_.remove(listener)
 
-    async def __emit__(self, *args: *_ARGS):
-        """Internal method to execute listeners."""
-        async with asyncio.TaskGroup() as group:
-            for listener in self.__listeners__:
-                try:
-                    res = listener(*args)
-                    if inspect.isawaitable(res):
-                        group.create_task(res)
-                except Exception:
-                    pass
-
-    async def emit(self, *args: *_ARGS) -> None:
+    async def emit(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
         """
         Emit the event, calling all registered listeners with the provided arguments.
 
@@ -139,12 +139,12 @@ class Event(Generic[*_ARGS]):
             Coroutine[Any, Any, None]: A coroutine that completes when all listeners
                                        have been processed.
         """
-        if self.__closed__:
+        if self._closed_:
             raise EventClosedError()
 
         # Wrap the internal __emit__ in a task to ensure it runs asynchronously
         # even if called from a context where the caller might not await it immediately.
-        await asyncio.create_task(self.__emit__(*args))
+        await asyncio.create_task(self._emit_(*args, **kwargs))
 
     def close(self) -> None:
         """
@@ -156,14 +156,14 @@ class Event(Generic[*_ARGS]):
         Raises:
             EventClosedError: If the event has already been closed.
         """
-        if self.__closed__:
+        if self._closed_:
             raise EventClosedError()
 
-        self.__closed__ = True
-        self.__listeners__.clear()
+        self._closed_ = True
+        self._listeners_.clear()
 
 
-__ON_SHUTDOWN__: Optional[Event[signal.Signals]] = None
+_ON_SHUTDOWN_: Optional[Event[signal.Signals]] = None
 
 
 def on_shutdown() -> Event[signal.Signals]:
@@ -173,20 +173,20 @@ def on_shutdown() -> Event[signal.Signals]:
     Returns:
         Event[signal.Signals]: The singleton event instance that triggers on shutdown signals.
     """
-    global __ON_SHUTDOWN__
+    global _ON_SHUTDOWN_
 
-    if __ON_SHUTDOWN__ is None:
-        __ON_SHUTDOWN__ = Event[signal.Signals]()
+    if _ON_SHUTDOWN_ is None:
+        _ON_SHUTDOWN_ = Event[signal.Signals]()
 
         # This inner function is the actual callback passed to the signal handler setup.
         # It captures the specific signal it's handling.
-        def handle_signal(signal_received: signal.Signals) -> Callable[[], None]:
+        def handle_signal(signal_received: signal.Signals) -> Callable[..., None]:
             """Factory to create a signal handler closure."""
 
-            def inner() -> None:
+            def inner(*args, **kwargs) -> None:
                 """The actual signal handler function."""
                 # Ensure the event emitter is correctly typed for the cast
-                shutdown_event = cast(Event[signal.Signals], __ON_SHUTDOWN__)
+                shutdown_event = cast(Event[signal.Signals], _ON_SHUTDOWN_)
                 try:
                     # Try to get the running asyncio loop and schedule the emit task.
                     loop = asyncio.get_running_loop()
@@ -208,31 +208,16 @@ def on_shutdown() -> Event[signal.Signals]:
                 # Create a unique handler for each signal using the factory
                 loop.add_signal_handler(s, handle_signal(s))
         except RuntimeError:
-            # Fallback to standard signal handling if asyncio loop isn't available or
-            # add_signal_handler is not supported (e.g., on Windows for some signals).
-            # Note: The signature for signal.signal handler is different, it expects (signum, frame).
-            # We adapt by creating a wrapper that fits the expected signature,
-            # although the frame argument is not used by our inner logic.
-            def signal_wrapper(
-                sig_enum: signal.Signals,
-            ) -> Callable[[int, Optional[inspect.FrameType]], None]:
-                handler_func = handle_signal(sig_enum)
-
-                def wrapper(signum: int, frame: Optional[inspect.FrameType]) -> None:
-                    handler_func()
-
-                return wrapper
-
             for s in signals_to_handle:
                 # Create a unique handler that fits the signal.signal signature
-                signal.signal(s, signal_wrapper(s))
+                signal.signal(s, handle_signal(s))
 
     # Ensure __ON_SHUTDOWN__ is not None before returning
-    if __ON_SHUTDOWN__ is None:
+    if _ON_SHUTDOWN_ is None:
         # This path should theoretically not be reached due to the logic above,
         # but acts as a safeguard.
         raise RuntimeError(
             "Failed to initialize the shutdown event."
         )  # Or handle appropriately
 
-    return __ON_SHUTDOWN__
+    return _ON_SHUTDOWN_

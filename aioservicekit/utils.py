@@ -1,15 +1,17 @@
 import asyncio
 from collections.abc import Coroutine
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, ParamSpec, TypeVar
 
 __all__ = ["safe_main"]
 
+
+_P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
 def safe_main(
-    fn: Callable[[...], Coroutine[Any, Any, _T]],  # type: ignore
-) -> Callable[[...], Coroutine[Any, Any, _T]]:  # type: ignore
+    fn: Callable[_P, Coroutine[Any, Any, _T]],
+) -> Callable[_P, Coroutine[Any, Any, _T]]:
     """
     Decorator to ensure all background asyncio tasks created by the decorated
     coroutine function complete before the function returns.
@@ -28,7 +30,7 @@ def safe_main(
         and then returns the original function's result.
     """
 
-    async def wrapper(*args, **kwargs) -> _T:
+    async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         """
         Asynchronous wrapper function that executes the decorated function and
         waits for background tasks.
@@ -45,7 +47,7 @@ def safe_main(
         Returns:
             _T: The result returned by the decorated function `fn`.
         """
-        res = await fn(*args, **kwargs)
+        res = await fn(*args, **kwargs)  # type: ignore[assignment]
 
         # Gather all tasks currently managed by the event loop
         tasks = asyncio.all_tasks()
@@ -61,3 +63,8 @@ def safe_main(
         return res
 
     return wrapper
+
+
+@safe_main
+async def t(x: int):
+    pass
