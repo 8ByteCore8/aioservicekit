@@ -1,18 +1,20 @@
 import asyncio
 import sys
 from abc import abstractmethod
-from collections.abc import Coroutine
-from typing import Any, Callable, Optional
+from collections.abc import Coroutine, Sequence
+from typing import Any, Callable, Optional, ParamSpec
 
-from aioservicekit.service import AbstractService
+from aioservicekit.service import Service
 
 if sys.version_info < (3, 11):
     from exceptiongroup import BaseExceptionGroup
 
 __all__ = ["Task", "task"]
 
+_P = ParamSpec("_P")
 
-class Task(AbstractService):
+
+class Task(Service):
     """
     Abstract base class for defining periodic tasks.
 
@@ -22,20 +24,27 @@ class Task(AbstractService):
     method to define the actual work to be performed.
     """
 
-    _interval_: float
+    __interval__: float
 
-    def __init__(self, interval: float, *, name: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        interval: float,
+        *,
+        name: Optional[str] = None,
+        dependences: Sequence[Service] = [],
+    ) -> None:
         """
         Initialize the Task instance.
 
         Args:
-            interval (float): The time interval in seconds between consecutive
-                              runs of the `__task__` method.
-            name (Optional[str]): An optional name for the service, used for logging
-                                  and identification. Defaults to None.
+            interval: The time interval in seconds between consecutive
+                runs of the `__task__` method.
+            name: An optional name for the service, used for logging
+                and identification. Defaults to None.
+            dependences: A sequence of services that this service depends on.
         """
-        super().__init__(name=name)
-        self._interval_ = interval
+        super().__init__(name=name, dependences=dependences)
+        self.__interval__ = interval
 
     @property
     def interval(self) -> float:
@@ -43,11 +52,11 @@ class Task(AbstractService):
         The interval in seconds between task executions.
 
         Returns:
-            float: The configured interval time.
+            The configured interval time.
         """
-        return self._interval_
+        return self.__interval__
 
-    async def _work_(self) -> None:
+    async def __work__(self) -> None:
         """
         The main work loop for the task.
 
@@ -60,7 +69,7 @@ class Task(AbstractService):
         """
         try:
             async with asyncio.TaskGroup() as tasks:
-                tasks.create_task(self._task_())
+                tasks.create_task(self.__task__())
                 # Sleep concurrently with the task execution to ensure the interval
                 # starts roughly when the task starts, not after it finishes.
                 # If the task finishes early, the sleep continues.
@@ -73,15 +82,15 @@ class Task(AbstractService):
                 for err in err_group.exceptions:
                     error_tasks.create_task(self.on_error.emit(err))
             # Wait for the interval after handling errors before the next cycle
-            await asyncio.sleep(self._interval_)
+            await asyncio.sleep(self.__interval__)
         except BaseException as err:
             # Handle single exceptions (e.g., from __task__ directly)
             await self.on_error.emit(err)
             # Wait for the interval after handling the error before the next cycle
-            await asyncio.sleep(self._interval_)
+            await asyncio.sleep(self.__interval__)
 
     @abstractmethod
-    def _task_(self) -> Coroutine[Any, Any, None]:
+    def __task__(self) -> Coroutine[Any, Any, None]:
         """
         The core task logic to be executed periodically.
 
@@ -90,13 +99,13 @@ class Task(AbstractService):
         a coroutine.
 
         Returns:
-            Coroutine[Any, Any, None]: A coroutine representing the task execution.
-                                       It should not return any meaningful value.
+            A coroutine representing the task execution.
+            It should not return any meaningful value.
         """
         pass
 
 
-class TaskFn(Task):
+class FnTask(Task):
     """
     A concrete implementation of Task that wraps a given coroutine function.
 
@@ -104,77 +113,108 @@ class TaskFn(Task):
     avoiding the need to subclass `Task` explicitly for simple cases.
     """
 
-    _task_fn_: Callable[[], Coroutine[Any, Any, None]]
+    __task_fn__: Callable[..., Coroutine[Any, Any, None]]
+    __args__: tuple
+    __kwargs__: dict
 
     def __init__(
         self,
-        fn: Callable[[], Coroutine[Any, Any, None]],
+        fn: Callable[..., Coroutine[Any, Any, None]],
+        args: tuple,
+        kwargs: dict,
         interval: float,
         *,
         name: Optional[str] = None,
+        dependences: Sequence[Service] = [],
     ) -> None:
         """
-        Initialize the TaskFn instance.
+        Initialize the FnTask instance.
 
         Args:
-            fn (Callable[[], Coroutine[Any, Any, None]]): The coroutine function
-                to be executed periodically as the task.
-            interval (float): The time interval in seconds between consecutive
-                              runs of the provided function `fn`.
-            name (Optional[str]): An optional name for the service, used for logging
-                                  and identification. Defaults to None.
+            fn: The coroutine function to be executed periodically as the task.
+            args: Positional arguments to pass to the task function.
+            kwargs: Keyword arguments to pass to the task function.
+            interval: The time interval in seconds between consecutive
+                runs of the provided function `fn`.
+            name: An optional name for the service, used for logging
+                and identification. Defaults to None.
+            dependences: A sequence of services that this service depends on.
         """
-        super().__init__(interval, name=name)
-        self._task_fn_ = fn
+        super().__init__(interval, name=name, dependences=dependences)
+        self.__task_fn__ = fn
+        self.__args__ = args
+        self.__kwargs__ = kwargs
 
-    def _task_(self) -> Coroutine[Any, Any, None]:
+    def __task__(self) -> Coroutine[Any, Any, None]:
         """
         Executes the wrapped coroutine function.
 
         This method is called periodically by the base `Task` class's work loop.
-        It simply calls the coroutine function provided during initialization.
+        It simply calls the coroutine function provided during initialization
+        with the stored arguments.
 
         Returns:
-            Coroutine[Any, Any, None]: The coroutine returned by the wrapped function.
+            The coroutine returned by the wrapped function.
         """
-        return self._task_fn_()
+        return self.__task_fn__(*self.__args__, **self.__kwargs__)
 
 
 def task(
-    interval: float, *, name: Optional[str] = None
-) -> Callable[[Callable[[], Coroutine[Any, Any, None]]], Task]:
+    interval: float,
+    *,
+    name: Optional[str] = None,
+    dependences: Sequence[Service] = [],
+) -> Callable[[Callable[_P, Coroutine[Any, Any, None]]], Callable[_P, Task]]:
     """
     Decorator factory to create a periodic Task from a coroutine function.
 
     This function acts as a factory that returns a decorator. When the decorator
-    is applied to a coroutine function, it wraps the function in a `TaskFn`
-    instance, effectively creating a periodic task that runs the decorated
-    function at the specified interval.
+    is applied to a coroutine function, it wraps the function call in a `FnTask`
+    instance upon invocation, effectively creating a periodic task factory that
+    runs the decorated function with its call arguments at the specified interval.
 
     Args:
-        interval (float): The time interval in seconds between consecutive
-                          runs of the decorated function.
-        name (Optional[str]): An optional name for the underlying service,
-                              used for logging and identification. Defaults to None.
+        interval: The time interval in seconds between consecutive
+            runs of the decorated function.
+        name: An optional name for the underlying service,
+            used for logging and identification. Defaults to None.
+        dependences: A sequence of services that the created task service
+            will depend on.
 
     Returns:
-        Callable[[Callable[[], Coroutine[Any, Any, None]]], Task]:
-            A decorator function that takes a coroutine function and returns
-            a `Task` instance.
+        A decorator function that takes a coroutine function and returns
+        a callable. This callable, when invoked with arguments matching the
+        decorated function's signature, returns a `Task` instance.
     """
 
-    def wrapper(func: Callable[[], Coroutine[Any, Any, None]]) -> Task:
+    def wrapper(func: Callable[_P, Coroutine[Any, Any, None]]) -> Callable[_P, Task]:
         """
         The actual decorator that wraps the coroutine function.
 
         Args:
-            func (Callable[[], Coroutine[Any, Any, None]]): The coroutine
-                  function to be executed periodically.
+            func: The coroutine function to be executed periodically.
 
         Returns:
-            Task: A `TaskFn` instance configured to run the provided function
-                  at the specified interval.
+            A callable that accepts the arguments for `func` and returns a
+            `FnTask` instance configured to run the provided function
+            at the specified interval with those arguments.
         """
-        return TaskFn(func, interval, name=name)
+
+        def inner(*args: _P.args, **kwargs: _P.kwargs) -> Task:
+            """
+            Creates a FnTask instance when the decorated function is called.
+
+            Args:
+                *args: Positional arguments for the decorated function.
+                **kwargs: Keyword arguments for the decorated function.
+
+            Returns:
+                A FnTask instance.
+            """
+            return FnTask(
+                func, args, kwargs, interval, name=name, dependences=dependences
+            )
+
+        return inner
 
     return wrapper

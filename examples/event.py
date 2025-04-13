@@ -1,5 +1,6 @@
 import asyncio
 
+import aioservicekit
 from aioservicekit import Event
 
 
@@ -10,6 +11,7 @@ def create_callback(id: int):
     return callback
 
 
+@aioservicekit.main
 async def main():
     on_example = Event[int]()
 
@@ -19,3 +21,7 @@ async def main():
     for i in range(10):
         await asyncio.sleep(1)
         await on_example.emit(i)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

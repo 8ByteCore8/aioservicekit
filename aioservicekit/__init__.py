@@ -1,27 +1,26 @@
 from .chanels import (
     Chanel,
-    ChanelClousedError,
     ChanelCustomer,
     ChanelCustomerClousedError,
     ClonnedChanel,
 )
 from .events import Event, EventClosedError, EventError, on_shutdown
 from .group import TaskGroup
-from .service import AbstractService, ServiceState, service
+from .service import Service, ServiceState, service
 from .tasks import Task, task
-from .utils import safe_main
+from .utils import main, run_services
 
 __all__ = [
-    "safe_main",
+    "main",
+    "run_services",
     "Event",
     "EventClosedError",
     "EventError",
     "on_shutdown",
-    "AbstractService",
+    "Service",
     "ServiceState",
     "service",
     "Chanel",
-    "ChanelClousedError",
     "ChanelCustomerClousedError",
     "ChanelCustomer",
     "ClonnedChanel",
