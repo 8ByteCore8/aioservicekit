@@ -9,7 +9,7 @@ class ExampleService(Service):
 
     async def __work__(self):
         i = 0
-        while self.is_running:
+        while self.run:
             await asyncio.sleep(1)
             print(f"Service works {i + 1} sec.")
             i += 1

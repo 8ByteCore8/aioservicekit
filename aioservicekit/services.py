@@ -7,7 +7,7 @@ from enum import IntEnum, auto
 from typing import Any, Callable, Optional, ParamSpec, Self
 
 from .events import Event, on_shutdown
-from .group import TaskGroup
+from .groups import TaskGroup
 
 __all__ = ["ServiceState", "Service", "service"]
 
@@ -74,7 +74,6 @@ class Service(ABC):
                                                     dependency stops. Defaults to [].
         """
         super().__init__()
-
         self.__name__ = name or self.__class__.__name__
         self.__main__ = None
         self.__state__ = ServiceState.STOPED
@@ -107,9 +106,12 @@ class Service(ABC):
             bool: True if all dependency services are in the RUNNING state,
                   False otherwise.
         """
-        return all(dependence.is_running for dependence in self.__dependences__)
+        return all(
+            dependence.state == ServiceState.RUNNING
+            for dependence in self.__dependences__
+        )
 
-    def __on_shutdown__(self, *args: Any, **kwargs: Any) -> Coroutine[Any, Any, None]:
+    def __on_shutdown__(self, *args: Any, **kwargs: Any) -> None:
         """
         Internal handler called on application shutdown (via `on_shutdown` event)
         to initiate the service stop sequence.
@@ -122,12 +124,9 @@ class Service(ABC):
             Coroutine[Any, Any, None]: An awaitable that completes when the stop
                                        method is called.
         """
-        # args and kwargs are ignored but present to match Event signature
-        return self.stop()
+        self.stop()
 
-    def __on_dependence_stop__(
-        self, state: ServiceState
-    ) -> Coroutine[Any, Any, None] | None:
+    def __on_dependence_stop__(self, state: ServiceState) -> None:
         """
         Internal listener callback triggered when a dependency's state changes.
 
@@ -142,9 +141,7 @@ class Service(ABC):
                                             otherwise None.
         """
         if state in [ServiceState.STOPING, ServiceState.STOPED]:
-            # If a dependency stops, this service should also stop.
-            return self.stop()
-        return None
+            self.stop()
 
     def __on_dependence_running__(
         self, state: ServiceState
@@ -163,9 +160,7 @@ class Service(ABC):
                                                designed for potential async operations.
         """
         if state == ServiceState.RUNNING and self.__is_dependences_running__():
-            # Check if *all* dependencies are running after this one changed state
             self.__dependences_waiter__.set()
-        return None  # Return type kept consistent, though currently no awaitable needed
 
     async def __work_wrapper__(self: Self) -> None:
         """
@@ -185,43 +180,20 @@ class Service(ABC):
             except Exception as err:
                 # Emit unexpected errors from the work loop
                 await self.on_error.emit(err)
-                # Consider adding a small delay here if work() fails repeatedly quickly
-                # await asyncio.sleep(1) # Optional: prevent fast failure loops
 
-        # Ensure stop is called if the loop exits for any reason other than
-        # explicit stop (e.g., __work__ finishes, raises unhandled error after emit)
-        # Use create_task to avoid blocking the wrapper if stop() awaits something.
         if self.__state__ == ServiceState.RUNNING:
-            asyncio.create_task(self.stop())
+            self.stop()
 
     @property
-    def is_stoped(self) -> bool:
-        """
-        Check if the service is currently stopped.
-
-        Returns:
-            bool: True if the service state is STOPED, False otherwise.
-        """
-        return self.__state__ == ServiceState.STOPED
+    def state(self) -> ServiceState:
+        return self.__state__
 
     @property
-    def is_running(self) -> bool:
-        """
-        Check if the service is currently running.
-
-        Returns:
-            bool: True if the service state is RUNNING, False otherwise.
-        """
+    def run(self) -> bool:
         return self.__state__ == ServiceState.RUNNING
 
     @property
     def name(self) -> str:
-        """
-        Get the name of the service.
-
-        Returns:
-            str: The assigned name of the service, or the class name if not provided.
-        """
         return self.__name__
 
     def create_task(
@@ -232,66 +204,36 @@ class Service(ABC):
         context: Context | None = None,
         canceliable: bool = True,
     ) -> asyncio.Task:
-        """
-        Create and manage a background task within the service's TaskGroup.
-
-        Tasks created here will be automatically cancelled when the service stops
-        if `canceliable` is True. Errors in these tasks are handled by the
-        TaskGroup and emitted via the service's `on_error` event.
-
-        Args:
-            coro (Coroutine[Any, Any, Any]): The coroutine to run as a task.
-            name (str | None): An optional name for the task. Defaults to None.
-            context (Context | None): An optional contextvars.Context for the task.
-                                    Defaults to None.
-            canceliable (bool): If True (default), the task can be cancelled
-                                when the service stops. If False, the task must
-                                complete before the service's `stop()` method returns.
-                                Defaults to True.
-
-        Returns:
-            asyncio.Task: The created asyncio Task object.
-        """
         return self.__tasks__.create_task(
             coro, name=name, context=context, canceliable=canceliable
         )
 
     async def start(self) -> None:
-        """
-        Start the service.
-
-        Transitions the service state through STARTING to RUNNING.
-        If the service has dependencies, it waits for them to be running.
-        Executes the `__on_start__` hook, subscribes to the global shutdown event,
-        and starts the main `__work__` loop in a background task.
-        Does nothing if the service is not currently STOPED.
-        """
-        if self.is_stoped:
-            self.__tasks__.reset_errors()
+        if self.__state__ == ServiceState.STOPED:
             self.__waiter__.clear()
-
             await self.__set_state__(ServiceState.STARTING)
+            self.__tasks__.reset_errors()
 
             # Setup dependency waiting
             if self.__dependences__:
+                # Add listeners *before* starting dependencies
+                for dependence in self.__dependences__:
+                    dependence.on_state_change.add_listener(
+                        self.__on_dependence_running__
+                    )
+                    dependence.on_state_change.add_listener(self.__on_dependence_stop__)
+
                 if not self.__is_dependences_running__():
                     self.__dependences_waiter__.clear()
-                    # Add listeners *before* starting dependencies
-                    for dependence in self.__dependences__:
-                        dependence.on_state_change.add_listener(
-                            self.__on_dependence_running__
-                        )
-                        dependence.on_state_change.add_listener(
-                            self.__on_dependence_stop__
-                        )
+
+                    # Start dependencies (if not already running, start is idempotent)
+                    # Use asyncio.gather for concurrent startup
+
+                    await asyncio.gather(
+                        *(dependence.start() for dependence in self.__dependences__)
+                    )
                 else:
                     self.__dependences_waiter__.set()  # Already running
-
-                # Start dependencies (if not already running, start is idempotent)
-                # Use asyncio.gather for concurrent startup
-                await asyncio.gather(
-                    *(dependence.start() for dependence in self.__dependences__)
-                )
 
                 # Wait for all dependencies to signal they are running
                 await self.__dependences_waiter__.wait()
@@ -312,7 +254,7 @@ class Service(ABC):
 
             # Start the main work loop
             self.__main__ = asyncio.create_task(
-                self.__work_wrapper__(), name=f"{self.__name__}-main"
+                self.__work_wrapper__(), name=f"{self.__name__}-work"
             )
 
     async def wait(self) -> None:
@@ -323,10 +265,46 @@ class Service(ABC):
         If the service is already STOPED, returns immediately.
         Useful for ensuring a service has shut down cleanly.
         """
-        if self.__state__ in (ServiceState.RUNNING, ServiceState.STOPING):
+        if self.__state__ != ServiceState.STOPED:
             await self.__waiter__.wait()
 
-    async def stop(self) -> None:
+    async def __stop__(self) -> None:
+        await self.__set_state__(ServiceState.STOPING)
+        # Clean up dependency listeners
+
+        for dependence in self.__dependences__:
+            dependence.on_state_change.remove_listener(self.__on_dependence_stop__)
+            dependence.on_state_change.remove_listener(self.__on_dependence_running__)
+
+        # Unsubscribe from application shutdown
+        on_shutdown().remove_listener(self.__on_shutdown__)
+
+        # Cancel main task first (if it exists and is running)
+        if self.__main__ and not self.__main__.done():
+            try:
+                # Wait for the main task to finish handling cancellation
+                await self.__main__
+            except asyncio.CancelledError:
+                pass  # Expected cancellation
+            except Exception as err:
+                # Log error during main task cleanup if needed
+                await self.on_error.emit(err)
+        self.__main__ = None  # Clear the reference
+
+        # Cancel and wait for all background tasks in the group
+        self.__tasks__.cancel()
+        await self.__tasks__.wait()
+
+        # Execute the user-defined stop hook
+        stop_hook = self.__on_stop__()
+        if inspect.isawaitable(stop_hook):
+            await stop_hook
+
+        # Mark as fully stopped
+        await self.__set_state__(ServiceState.STOPED)
+        self.__waiter__.set()  # Signal anyone waiting for stop completion
+
+    def stop(self) -> None:
         """
         Stop the service gracefully.
 
@@ -338,54 +316,9 @@ class Service(ABC):
         the stop process is complete.
         Does nothing if the service is not currently RUNNING or STARTING.
         """
-        # Allow stopping even if STARTING, but not if already STOPING or STOPED
-        if self.__state__ in (ServiceState.RUNNING, ServiceState.STARTING):
-            # Prevent duplicate stop calls from running concurrently
-            if self.__state__ == ServiceState.STOPING:
-                # Already stopping, wait for it to complete
-                await self.__waiter__.wait()
-                return
-
-            await self.__set_state__(ServiceState.STOPING)
-
-            # Clean up dependency listeners
-            for dependence in self.__dependences__:
-                dependence.on_state_change.remove_listener(self.__on_dependence_stop__)
-                dependence.on_state_change.remove_listener(
-                    self.__on_dependence_running__
-                )
-
-            # Unsubscribe from application shutdown
-            on_shutdown().remove_listener(self.__on_shutdown__)
-
-            # Cancel main task first (if it exists and is running)
-            if self.__main__ is not None and not self.__main__.done():
-                try:
-                    # Wait for the main task to finish handling cancellation
-                    await self.__main__
-                except asyncio.CancelledError:
-                    pass  # Expected cancellation
-                except Exception as err:
-                    # Log error during main task cleanup if needed
-                    await self.on_error.emit(err)
-            self.__main__ = None  # Clear the reference
-
-            # Cancel and wait for all background tasks in the group
-            self.__tasks__.cancel()
-            await self.__tasks__.wait()  # TaskGroup handles internal errors/logging
-
-            # Execute the user-defined stop hook
-            stop_hook = self.__on_stop__()
-            if inspect.isawaitable(stop_hook):
-                try:
-                    await stop_hook
-                except Exception as err:
-                    # Log error during stop hook execution
-                    await self.on_error.emit(err)
-
-            # Mark as fully stopped
-            await self.__set_state__(ServiceState.STOPED)
-            self.__waiter__.set()  # Signal anyone waiting for stop completion
+        if self.__state__ == ServiceState.RUNNING:
+            self.__state__ = ServiceState.STOPING
+            asyncio.create_task(self.__stop__())
 
     async def restart(self) -> None:
         """
@@ -394,9 +327,9 @@ class Service(ABC):
         Convenience method that calls `stop()` followed by `start()`.
         Ensures the service is fully stopped before attempting to start again.
         """
-        if not self.is_stoped:
-            await self.stop()
-            await self.wait()  # Ensure stop completes fully
+        if self.__state__ == ServiceState.RUNNING:
+            self.stop()
+            await self.wait()
         await self.start()
 
     def __on_start__(self) -> Coroutine[Any, Any, None] | None:
@@ -512,7 +445,6 @@ class FnService(Service):
             None: Mirrors the expected return of the wrapped function in the context
                   of the service work loop.
         """
-        # The return value is implicitly awaited by the caller (__work_wrapper__)
         await self.__work_fn__(*self.__args__, **self.__kwargs__)
 
 

@@ -8,21 +8,21 @@ A `TaskGroup` is used as an asynchronous context manager (`async with`). Tasks c
 
 ## Key Features & API
 
-*   **Context Manager**: Used via `async with TaskGroup(...) as group:`.
-*   **Task Creation**: `group.create_task(coro, *, name=None, context=None, canceliable=True) -> asyncio.Task`
-    *   Creates, schedules, and manages an `asyncio.Task` for the given coroutine `coro`.
-    *   **`canceliable` (bool)**: If `True` (default), the task will be cancelled if the group exits due to an unhandled exception (and `error_tolerance=False`), or if `group.cancel()` is called explicitly. If `False`, the task will *not* be cancelled in these scenarios and the `TaskGroup` will wait for it to complete naturally during `__aexit__` or `wait()`. This is useful for critical cleanup tasks that must run to completion.
-*   **Error Tolerance**: `TaskGroup(*, error_tolerance: bool = False)`
-    *   If `error_tolerance=False` (default): The first exception raised by any task (that isn't `asyncio.CancelledError`) will cause the `TaskGroup` to cancel all other *cancellable* tasks. Upon exiting the `async with` block (or calling `wait()`), a `BaseExceptionGroup` containing the error(s) that occurred before cancellation is raised.
-    *   If `error_tolerance=True`: Exceptions in tasks do *not* cause other tasks to be cancelled. All tasks run to completion (or until cancelled externally). Any exceptions are collected and stored. They are *not* raised automatically on exit but can be accessed via the `error` property. The `on_error` event is still emitted for each error.
-*   **Error Event**: `group.on_error` (`Event[BaseException]`)
-    *   This event is emitted whenever a task managed by the group finishes with an exception (other than `asyncio.CancelledError`), regardless of the `error_tolerance` setting. You can add listeners to log errors or react to them immediately.
-*   **Error Access**: `group.error` (Property) -> `list[BaseException]`
-    *   Returns a list of exceptions collected from completed tasks. If `error_tolerance=False`, this typically contains only the first error(s) that triggered cancellation. If `error_tolerance=True`, it contains all errors from all completed tasks that failed.
-*   **Waiting**: `async def wait(self)`
-    *   Waits until *all* tasks (cancellable and uncancellable) in the group have completed. If `error_tolerance=False` and errors occurred, raises `BaseExceptionGroup` after waiting.
-*   **Cancellation**: `cancel(self)`
-    *   Explicitly cancels all *cancellable* tasks currently running in the group.
+* **Context Manager**: Used via `async with TaskGroup(...) as group:`.
+* **Task Creation**: `group.create_task(coro, *, name=None, context=None, canceliable=True) -> asyncio.Task`
+    * Creates, schedules, and manages an `asyncio.Task` for the given coroutine `coro`.
+    * **`canceliable` (bool)**: If `True` (default), the task will be cancelled if the group exits due to an unhandled exception (and `error_tolerance=False`), or if `group.cancel()` is called explicitly. If `False`, the task will *not* be cancelled in these scenarios and the `TaskGroup` will wait for it to complete naturally during `__aexit__` or `wait()`. This is useful for critical cleanup tasks that must run to completion.
+* **Error Tolerance**: `TaskGroup(*, error_tolerance: bool = False)`
+    * If `error_tolerance=False` (default): The first exception raised by any task (that isn't `asyncio.CancelledError`) will cause the `TaskGroup` to cancel all other *cancellable* tasks. Upon exiting the `async with` block (or calling `wait()`), a `BaseExceptionGroup` containing the error(s) that occurred before cancellation is raised.
+    * If `error_tolerance=True`: Exceptions in tasks do *not* cause other tasks to be cancelled. All tasks run to completion (or until cancelled externally). Any exceptions are collected and stored. They are *not* raised automatically on exit but can be accessed via the `errors` property. The `on_error` event is still emitted for each error.
+* **Error Event**: `group.on_error` (`Event[BaseException]`)
+    * This event is emitted whenever a task managed by the group finishes with an exception (other than `asyncio.CancelledError`), regardless of the `error_tolerance` setting. You can add listeners to log errors or react to them immediately.
+* **Error Access**: `group.errors` (Property) -> `list[BaseException]`
+    * Returns a list of exceptions collected from completed tasks. If `error_tolerance=False`, this typically contains only the first error(s) that triggered cancellation. If `error_tolerance=True`, it contains all errors from all completed tasks that failed.
+* **Waiting**: `async wait(self)`
+    * Waits until *all* tasks (cancellable and uncancellable) in the group have completed. If `error_tolerance=False` and errors occurred, raises `BaseExceptionGroup` after waiting.
+* **Cancellation**: `cancel(self)`
+    * Explicitly cancels all *cancellable* tasks currently running in the group.
 
 ## Examples
 
@@ -133,9 +133,9 @@ async def main():
     logging.info("TaskGroup finished.")
 
     # Check collected errors
-    if group.error:
-        logging.warning(f"Collected {len(group.error)} error(s):")
-        for i, err in enumerate(group.error):
+    if group.errors:
+        logging.warning(f"Collected {len(group.errors)} error(s):")
+        for i, err in enumerate(group.errors):
             logging.warning(f"  Error {i+1}: {type(err).__name__}: {err}")
     else:
         logging.info("No errors collected.")

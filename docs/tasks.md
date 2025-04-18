@@ -5,6 +5,7 @@
 ## Concept
 
 A `Task` is essentially a `Service` where the `__work__` loop is predefined to:
+
 1. Execute a specific task logic (defined in `__task__`).
 2. Sleep for a configured `interval`.
 3. Repeat.
@@ -61,9 +62,9 @@ if __name__ == "__main__":
 
 **Decorator Arguments:**
 
-*   **`interval` (float, required)**: The number of seconds to wait *after starting* one execution before starting the next. The timing aims to start tasks `interval` seconds apart, regardless of how long the task itself takes (up to a point - if a task takes longer than the interval, the next one starts immediately after the long one finishes).
-*   **`name` (Optional[str])**: Name for the underlying service. Defaults to the function name.
-*   **`dependences` (Optional[Sequence[Service]])**: List of other services this task depends on.
+* **`interval` (float, required)**: The number of seconds to wait between task executions. Task scheduling ensures consistent intervals regardless of execution time.
+* **`name` (Optional[str])**: Optional name for the task service. Defaults to the decorated function name.
+* **`dependences` (Optional[Sequence[Service]])**: List of services this task depends on.
 
 ### 2. Subclassing `Task`
 
@@ -117,9 +118,9 @@ class DataArchiverTask(Task):
 
 **Key `Task` Components:**
 
-*   **`__init__(self, interval, *, name=None, dependences=[])`**: Initialize the task, passing the `interval`. Call `super().__init__(...)`.
-*   **`async def __task__(self)` (Abstract - Must Implement)**: The core logic to be executed periodically.
-*   **`interval` (Property)**: Returns the configured interval.
-*   **Inherited `Service` features**: All methods and properties from `Service` are available (`start`, `stop`, `wait`, `create_task`, `on_error`, `on_state_change`, etc.).
+* **`__init__(self, interval, *, name=None, dependences=[])`**: Initialize the task, passing the `interval`. Call `super().__init__(...)`.
+* **`async __task__(self)` (Abstract - Must Implement)**: The core logic to be executed periodically.
+* **`interval` (Property)**: Returns the configured interval.
+* **Inherited `Service` features**: All methods and properties from `Service` are available (`start`, `stop`, `wait`, `create_task`, `on_error`, `on_state_change`, etc.).
 
 Choose the `@task` decorator for simple, stateless periodic actions, and subclass `Task` when you need internal state, complex dependencies, or custom lifecycle logic within your periodic task.

@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator, Awaitable, Coroutine
 from contextlib import asynccontextmanager
 from typing import Any, Callable, ParamSpec, TypeVar, cast
 
-from aioservicekit.service import Service
+from aioservicekit.services import Service
 
 __all__ = ["main", "run_services"]
 
@@ -51,7 +51,6 @@ def main(
             The result returned by the decorated function `fn`.
         """
         res = await fn(*args, **kwargs)  # type: ignore[assignment]
-
         # Gather all tasks currently managed by the event loop
         tasks = asyncio.all_tasks()
 
@@ -116,7 +115,7 @@ async def run_services(
             # Attempt to stop all started services regardless of errors
             # during the stop process itself (though asyncio might handle this)
             try:
-                await service.stop()
+                service.stop()
             except Exception:
                 # TODO: Consider logging stop errors, but don't let them
                 # prevent other services from being stopped.

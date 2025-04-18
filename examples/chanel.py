@@ -1,38 +1,27 @@
 import asyncio
 
 import aioservicekit
-from aioservicekit import Service, Chanel
-from aioservicekit.chanels import ChanelCustomer
+from aioservicekit import Channel, Service
+
+NUMBERS: Channel[tuple[str, int]] = Channel()
 
 
-async def timeout(service: Service, timeout: int):
-    await asyncio.sleep(timeout)
-    await service.stop()
-
-
-NUMBERS: Chanel[tuple[str, int]] = Chanel()
-
-
-@aioservicekit.service()
+@aioservicekit.services()
 async def Generator(name: str, limit: int):
-    for i in range(limit):
-        await NUMBERS.send((name, i))
-        await asyncio.sleep(1)
+    async with await NUMBERS.connect() as pub:
+        for i in range(limit):
+            await pub.send((name, i))
+            await asyncio.sleep(1)
+
     raise asyncio.CancelledError()
 
 
 class Printer(Service):
-    __receiver__: ChanelCustomer[tuple[str, int]]
-
-    def __on_start__(self) -> None:
-        self.__receiver__ = NUMBERS.connect()
-
-    def __on_stop__(self) -> None:
-        NUMBERS.disconnect(self.__receiver__)
-
     async def __work__(self):
-        async for name, num in self.__receiver__:
-            print(f"Printer receive {num} from Generator {name}.")
+        async with await NUMBERS.subscribe() as sub:
+            async for name, num in sub:
+                print(f"Printer receive {num} from Generator {name}.")
+        raise asyncio.CancelledError()
 
 
 @aioservicekit.main

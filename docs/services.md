@@ -108,20 +108,20 @@ class ComplexService(Service):
 
 **Key `Service` Components:**
 
-*   **`__init__(self, *, name=None, dependences=[])`**: Initialize your service. Call `super().__init__(...)`.
-*   **`async def __work__(self)` (Abstract - Must Implement)**: The core logic loop. Called repeatedly while the service is `RUNNING`. If this method finishes or raises an unhandled exception (after being emitted to `on_error`), the service will initiate a stop. It *should* contain `await` calls (e.g., `asyncio.sleep`, I/O operations) to yield control.
-*   **`async def __on_start__(self)` (Optional)**: Hook executed during `start()` *after* dependencies are running but *before* `__work__` starts and the state becomes `RUNNING`. Use for async initialization.
-*   **`async def __on_stop__(self)` (Optional)**: Hook executed during `stop()` *after* `__work__` is cancelled and *after* background tasks are awaited. Use for async cleanup.
-*   **`async def start(self)`**: Transitions state `STOPED` -> `STARTING` -> `RUNNING`. Waits for dependencies, runs `__on_start__`, starts the `__work__` loop task, subscribes to `on_shutdown`. Idempotent if already started/running.
-*   **`async def stop(self)`**: Transitions state `RUNNING`/`STARTING` -> `STOPING` -> `STOPED`. Cancels `__work__`, runs `__on_stop__`, cancels background tasks, unsubscribes from `on_shutdown`, waits for cleanup. Idempotent if already stopping/stopped.
-*   **`async def wait(self)`**: Returns an awaitable that completes only when the service reaches the `STOPED` state.
-*   **`async def restart(self)`**: Convenience method: `await self.stop()` then `await self.wait()` then `await self.start()`.
-*   **`create_task(self, coro, *, name=None, context=None, canceliable=True)`**: Creates an `asyncio.Task` managed by the service's internal `TaskGroup`. These tasks are automatically cancelled during `stop()` if `canceliable` is `True`. Errors are emitted via `self.on_error`.
-*   **`state` (Property)**: Returns the current `ServiceState`.
-*   **`is_running`, `is_stoped` (Properties)**: Boolean checks for state.
-*   **`name` (Property)**: The service name.
-*   **`on_state_change` (Event)**: An `Event[ServiceState]` triggered when the state changes.
-*   **`on_error` (Event)**: An `Event[BaseException]` triggered when an unhandled exception occurs in `__work__` or any background task created with `create_task`.
+* **`__init__(self, *, name=None, dependences=[])`**: Initialize your service. Call `super().__init__(...)`.
+* **`async __work__(self)` (Abstract - Must Implement)**: The core logic loop. Called repeatedly while the service is `RUNNING`. If this method finishes or raises an unhandled exception (after being emitted to `on_error`), the service will initiate a stop. It *should* contain `await` calls (e.g., `asyncio.sleep`, I/O operations) to yield control.
+* **`async __on_start__(self)` (Optional)**: Hook executed during `start()` *after* dependencies are running but *before* `__work__` starts and the state becomes `RUNNING`. Use for async initialization.
+* **`async __on_stop__(self)` (Optional)**: Hook executed during `stop()` *after* `__work__` is cancelled, and *after* background tasks are awaited. Use for async cleanup.
+* **`async start(self)`**: Transitions state `STOPED` -> `STARTING` -> `RUNNING`. Waits for dependencies, runs `__on_start__`, starts the `__work__` loop task, subscribes to `on_shutdown`. Idempotent if already started/running.
+* **`async stop(self)`**: Transitions state `RUNNING`/`STARTING` -> `STOPING` -> `STOPED`. Cancels `__work__`, runs `__on_stop__`, cancels background tasks, unsubscribes from `on_shutdown`, waits for cleanup. Idempotent if already stopping/stopped.
+* **`async wait(self)`**: Returns an awaitable that completes only when the service reaches the `STOPED` state.
+* **`async restart(self)`**: Convenience method: `await self.stop()` then `await self.wait()` then `await self.start()`.
+* **`create_task(self, coro, *, name=None, context=None, canceliable=True)`**: Creates an `asyncio.Task` managed by the service's internal `TaskGroup`. These tasks are automatically cancelled during `stop()` if `canceliable` is `True`. Errors are emitted via `self.on_error`.
+* **`state` (Property)**: Returns the current `ServiceState`.
+* **`is_running`, `is_stoped` (Properties)**: Boolean checks for state.
+* **`name` (Property)**: The service name.
+* **`on_state_change` (Event)**: An `Event[ServiceState]` triggered when the state changes.
+* **`on_error` (Event)**: An `Event[BaseException]` triggered when an unhandled exception occurs in `__work__` or any background task created with `create_task`.
 
 ## Dependencies
 
@@ -141,8 +141,8 @@ async def api_service_worker():
 #    ...
 ```
 
-*   Dependencies are passed as a list to the `__init__` method (or the `@service` decorator).
-*   `start()` will wait for all dependencies to reach the `RUNNING` state.
-*   If any dependency transitions to `STOPING` or `STOPED`, the dependent service will automatically call its own `stop()` method.
+* Dependencies are passed as a list to the `__init__` method (or the `@service` decorator).
+* `start()` will wait for all dependencies to reach the `RUNNING` state.
+* If any dependency transitions to `STOPING` or `STOPED`, the dependent service will automatically call its own `stop()` method.
 
 Services provide a powerful abstraction for managing the lifecycle and execution of asynchronous components within your application. Choose the decorator for simplicity or subclassing for more control.

@@ -4,55 +4,64 @@
 
 ## `Event[P]`
 
-The `Event` class allows you to define custom events that components can subscribe (listen) to and emit. It's typed using `typing.ParamSpec` (`P`) to ensure listeners have the correct signature for the arguments the event will be emitted with.
+The `Event` class allows you to define custom events that components can subscribe (listen) to and emit. It's typed using `typing.ParamSpec` (`P`) to ensure listeners have the correct signature for the arguments the event will be emitted with. Internally uses task groups for concurrent execution.
 
 **Key Features:**
 
-*   **Typed Arguments**: Define the expected arguments for listeners using `ParamSpec`.
-*   **Sync/Async Listeners**: Supports both regular functions and `async def` functions as listeners.
-*   **Concurrent Emission**: When an event is emitted, all async listeners are run concurrently using an internal `asyncio.TaskGroup`. Sync listeners are called sequentially before async listeners are scheduled.
-*   **Context Manager**: Can be used in a `with` statement to ensure `close()` is called on exit.
-*   **Error Handling**: Exceptions raised within listeners during emission are caught and suppressed (consider adding logging within your listeners if needed).
+* **Typed Arguments**: Define the expected arguments for listeners using `ParamSpec`.
+* **Sync/Async Listeners**: Supports both regular functions and `async def` functions as listeners.
+* **Concurrent Emission**: When an event is emitted, all async listeners are run concurrently using an internal `asyncio.TaskGroup`. Sync listeners are called sequentially before async listeners are scheduled.
+* **Context Manager**: Can be used in a `with` statement to ensure `close()` is called on exit.
+* **Error Handling**: Exceptions raised within listeners during emission are caught and logged but do not halt event emission.
 
 **API:**
 
-*   `__init__(self)`: Creates a new event.
-*   `add_listener(self, listener: Callable[P, None | Coroutine])`: Adds a listener function/coroutine. Raises `EventClosedError` if closed.
-*   `remove_listener(self, listener: Callable[P, None | Coroutine])`: Removes a specific listener. Raises `EventClosedError` if closed.
-*   `async def emit(self, *args: P.args, **kwargs: P.kwargs)`: Emits the event, calling all listeners with the provided arguments. Raises `EventClosedError` if closed.
-*   `close(self)`: Marks the event as closed, clears all listeners, and prevents further emissions or listener modifications. Idempotent.
-*   `is_closed` (Property): Returns `True` if the event is closed.
+* `__init__(self)`: Creates a new event.
+* `add_listener(self, listener: Callable[P, None | Coroutine])`: Adds a listener function/coroutine. Raises `EventClosedError` if closed.
+* `remove_listener(self, listener: Callable[P, None | Coroutine])`: Removes a specific listener. Raises `EventClosedError` if closed.
+* `async emit(self, *args: P.args, **kwargs: P.kwargs)`: Emits the event with provided arguments to all listeners concurrently.
+* `close(self)`: Marks the event as closed and clears all listeners. Idempotent.
+* `is_closed` (Property): Returns `True` if the event is closed.
 
 **Example:**
 
 ```python
 import asyncio
 import logging
-from typing import ParamSpec
+from dataclasses import dataclass
+
 from aioservicekit import Event
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# Define the parameter specification for our custom event
-P_UserData = ParamSpec("P_UserData")
+
+@dataclass
+class User:
+    id: int
+    data: dict
+
 
 # Create an event that expects a user ID (int) and a data dictionary (dict)
-user_data_updated_event = Event[P_UserData]()
+user_data_updated_event: Event[User] = Event()
 # Type checker expects: (user_id: int, data: dict) -> None | Coroutine
 
+
 # Define some listeners
-def sync_listener(user_id: int, data: dict):
-    logging.info(f"[Sync] User {user_id} updated data: {list(data.keys())}")
+def sync_listener(user: User):
+    logging.info(f"[Sync] User {user.id} updated data: {list(user.data.keys())}")
 
-async def async_listener_1(user_id: int, data: dict):
-    logging.info(f"[Async 1] Processing update for user {user_id}...")
+
+async def async_listener_1(user: User):
+    logging.info(f"[Async 1] Processing update for user {user.id}...")
     await asyncio.sleep(0.5)
-    logging.info(f"[Async 1] Finished processing for user {user_id}")
+    logging.info(f"[Async 1] Finished processing for user {user.id}")
 
-async def async_listener_2(user_id: int, data: dict):
-    logging.info(f"[Async 2] Archiving data for user {user_id}...")
+
+async def async_listener_2(user: User):
+    logging.info(f"[Async 2] Archiving data for user {user.id}...")
     await asyncio.sleep(0.2)
-    logging.info(f"[Async 2] Finished archiving for user {user_id}")
+    logging.info(f"[Async 2] Finished archiving for user {user.id}")
+
 
 async def main():
     # Add listeners
@@ -62,22 +71,27 @@ async def main():
 
     logging.info("Emitting event for user 101")
     # Emit the event with matching arguments
-    await user_data_updated_event.emit(user_id=101, data={"name": "Alice", "email": "a@ex.com"})
+    await user_data_updated_event.emit(
+        User(id=101, data={"name": "Alice", "email": "a@ex.com"})
+    )
 
     logging.info("Removing async_listener_2")
     user_data_updated_event.remove_listener(async_listener_2)
 
     logging.info("Emitting event for user 202")
-    await user_data_updated_event.emit(user_id=202, data={"status": "active"})
+    await user_data_updated_event.emit(User(id=202, data={"status": "active"}))
 
     logging.info("Closing the event")
     user_data_updated_event.close()
 
     try:
         logging.info("Attempting to emit on closed event...")
-        await user_data_updated_event.emit(user_id=303, data={})
+        await user_data_updated_event.emit(User(id=303, data={}))
     except Exception as e:
-        logging.error(f"Caught expected error: {type(e).__name__}") # Expect EventClosedError
+        logging.error(
+            f"Caught expected error: {type(e).__name__}"
+        )  # Expect EventClosedError
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -89,15 +103,15 @@ This is a globally accessible, singleton `Event` specifically designed to handle
 
 **Features:**
 
-*   **Singleton**: Calling `on_shutdown()` multiple times returns the same `Event` instance.
-*   **Signal Handling**: Automatically registers handlers for `signal.SIGINT` (Ctrl+C), `signal.SIGTERM` (standard termination signal), and `signal.SIGHUP` (hangup, often used for config reload or shutdown).
-*   **Emission**: When one of the handled signals is received, it emits the `signal.Signals` enum value (e.g., `signal.SIGINT`) to all its listeners.
-*   **Auto-Close**: After emitting the signal, the `on_shutdown` event automatically closes itself, preventing further emissions.
-*   **Loop Agnostic**: Works correctly whether an `asyncio` event loop is currently running or not when the signal arrives.
+* **Singleton**: Calling `on_shutdown()` multiple times returns the same `Event` instance.
+* **Signal Handling**: Automatically registers handlers for `signal.SIGINT` (Ctrl+C), `signal.SIGTERM` (standard termination signal), and `signal.SIGHUP` (hangup).
+* **Emission**: When a signal is received, emits the `signal.Signals` enum value to all listeners.
+* **Auto-Close**: After emitting the signal, the event closes itself preventing further emissions.
+* **Loop Agnostic**: Works correctly whether an `asyncio` event loop is running or not.
 
 **Usage:**
 
-You typically add listeners to `on_shutdown()` to perform cleanup tasks when the application is requested to terminate. `aioservicekit.Service` uses this internally to trigger its `stop()` method.
+Add cleanup task listeners to `on_shutdown()` for graceful application termination. Used internally by `Service` to trigger `stop()`.
 
 ```python
 import asyncio

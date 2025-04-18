@@ -85,7 +85,7 @@ class TaskGroup:
         self.__errors__ = []
 
     @property
-    def error(self) -> list[BaseException]:
+    def errors(self) -> list[BaseException]:
         """
         Get a list of errors collected from tasks within the group.
 
@@ -99,7 +99,7 @@ class TaskGroup:
         """
         return [*self.__errors__]
 
-    def _on_task_done_(self, task: asyncio.Task) -> None:
+    def __on_task_done__(self, task: asyncio.Task) -> None:
         """
         Internal callback for when a task managed by the group completes.
 
@@ -114,9 +114,14 @@ class TaskGroup:
         self.__tasks__.discard(task)
         self.__uncanceliable_tasks__.discard(task)
 
-        if (error := task.exception()) is not None and not isinstance(
-            error, asyncio.CancelledError
-        ):
+        try:
+            error = task.exception()
+        except asyncio.CancelledError:
+            error = None
+        except BaseException as err:
+            error = err
+
+        if error and not isinstance(error, asyncio.CancelledError):
             # Always emit the error event, regardless of tolerance
             asyncio.create_task(self.on_error.emit(error))
 
@@ -149,7 +154,7 @@ class TaskGroup:
             The created `asyncio.Task` instance.
         """
         task = asyncio.create_task(coro, name=name, context=context)
-        task.add_done_callback(self._on_task_done_)
+        task.add_done_callback(self.__on_task_done__)
 
         if canceliable:
             self.__tasks__.add(task)
@@ -188,7 +193,7 @@ class TaskGroup:
                                 tasks raised exceptions.
         """
         if all_tasks := set([*self.__uncanceliable_tasks__, *self.__tasks__]):
-            await asyncio.wait(all_tasks)
+            await asyncio.wait(list(all_tasks))
 
         if self.__errors__ and not self.__error_tolerance__:
             # Raise only if errors occurred *and* we are not tolerating them.

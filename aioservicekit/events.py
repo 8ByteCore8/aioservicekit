@@ -1,7 +1,8 @@
 import asyncio
 import inspect
+import logging
 import signal
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Coroutine
 from typing import (
     Any,
     Callable,
@@ -13,23 +14,20 @@ from typing import (
 )
 
 _P = ParamSpec("_P")
+logger = logging.getLogger(__name__)
 
 __all__ = [
-    "EventError",
     "EventClosedError",
     "Event",
     "on_shutdown",
 ]
 
 
-class EventError(Exception):
-    """Base exception for event-related errors."""
-
-    pass
-
-
-class EventClosedError(EventError):
-    """Raised when an operation is attempted on a closed event."""
+class EventClosedError(Exception):
+    """
+    Exception raised when attempting to perform operations on a closed event.
+    This includes adding listeners or emitting events after close() is called.
+    """
 
     pass
 
@@ -38,206 +36,256 @@ class Event(Generic[_P]):
     """
     Event class that allows registering listeners and emitting events.
 
-    Supports both synchronous and asynchronous listeners. Can be used as a context manager
-    to ensure the event is closed upon exiting the context.
+    This class implements the observer pattern, allowing functions to subscribe
+    to events and be notified when those events occur. It supports both
+    synchronous and asynchronous listeners and can be used as a context manager.
 
     Type Args:
-        _P: The ParamSpec defining the argument types that listeners registered
-            to this event will accept.
+        _P: ParamSpec that defines the argument types that registered listeners
+            must accept. This ensures type safety between emitters and listeners.
     """
 
-    __closed__: bool = False
-    __listeners__: set[Callable[_P, None | Coroutine[Any, Any, None]]]
+    __closed__: bool = False  # Flag indicating if event is closed
+    __listeners__: set[
+        Callable[_P, None | Coroutine[Any, Any, None]]
+    ]  # Set of registered listener functions
 
     def __init__(self) -> None:
         """
         Initialize a new Event instance.
         """
         self.__listeners__ = set()
+        logger.debug("Initialized new Event instance")
 
     def __enter__(self) -> Self:
         """
-        Enter the runtime context related to this object.
+        Enter context manager.
+        Allows event to be used in 'with' statements for automatic cleanup.
 
         Returns:
-            The event instance itself.
+            Self: The event instance itself.
         """
+        logger.debug("Entering Event context")
         return self
 
-    def __exit__(self, *args) -> None:
+    def __exit__(
+        self, et: type[Exception], exc: Exception, tb: inspect.Traceback
+    ) -> None:
         """
-        Exit the runtime context and close the event.
+        Exit context manager and ensure event is closed.
+
+        Args:
+            et: Exception type if an error occurred
+            exc: Exception instance if an error occurred
+            tb: Traceback if an error occurred
         """
+        logger.debug("Exiting Event context")
         self.close()
+        if et:
+            logger.error(f"Exception occurred in Event context: {exc}", exc_info=exc)
+            raise exc
 
     async def __emit__(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
-        """Internal method to execute listeners."""
+        """
+        Internal method to execute all registered listeners.
+
+        Creates an asyncio TaskGroup to run listeners concurrently.
+        Handles both sync and async listeners appropriately.
+        Silently catches listener exceptions to prevent cascade failures.
+
+        Args:
+            *args: Positional arguments to pass to listeners
+            **kwargs: Keyword arguments to pass to listeners
+        """
+        logger.debug(f"Emitting event to {len(self.__listeners__)} listeners")
         async with asyncio.TaskGroup() as group:
             for listener in self.__listeners__:
                 try:
                     res = listener(*args, **kwargs)
                     if inspect.isawaitable(res):
-                        group.create_task(res)
-                except Exception:
-                    # Consider logging the exception instead of passing silently
-                    pass
+                        logger.debug(f"Running async listener {listener.__name__}")
+
+                        async def __emit_wrapper__(coro: Awaitable) -> None:
+                            try:
+                                await coro
+                            except Exception as e:
+                                logger.error(
+                                    f"Error in async listener: {e}", exc_info=e
+                                )
+
+                        group.create_task(__emit_wrapper__(res))
+                    else:
+                        logger.debug(f"Ran sync listener {listener.__name__}")
+                except Exception as e:
+                    logger.error(f"Error in listener: {e}", exc_info=e)
 
     @property
     def is_closed(self) -> bool:
-        """Check if the event is closed."""
+        """
+        Property indicating if event is closed.
+
+        Returns:
+            bool: True if event is closed, False otherwise
+        """
         return self.__closed__
 
     def add_listener(
         self, listener: Callable[_P, None | Coroutine[Any, Any, None]]
     ) -> None:
         """
-        Subscribe a listener callable to this event.
+        Register a new listener function or coroutine.
 
-        The listener can be a regular function or an async function (coroutine).
-        It will be called with the arguments provided during the `emit` call.
+        The listener can be either a regular function or an async function.
+        When the event is emitted, the listener will be called with the emit arguments.
 
         Args:
-            listener: The callable function or coroutine to be added as a listener.
+            listener: Function or coroutine to register as a listener
 
         Raises:
-            EventClosedError: If the event has already been closed.
+            EventClosedError: If the event has been closed
         """
         if self.__closed__:
+            logger.error("Attempted to add listener to closed event")
             raise EventClosedError()
 
         if callable(listener):
             self.__listeners__.add(listener)
+            logger.debug(f"Added listener {listener.__name__}")
 
     def remove_listener(
         self, listener: Callable[_P, None | Coroutine[Any, Any, None]]
     ) -> None:
         """
-        Unsubscribe a listener callable from this event.
+        Remove a previously registered listener.
+
+        Safely removes listener from the set of registered listeners.
+        No error if listener wasn't registered.
 
         Args:
-            listener: The listener callable to remove.
-
-        Raises:
-            EventClosedError: If the event has already been closed.
+            listener: The listener function/coroutine to remove
         """
-        if self.__closed__:
-            raise EventClosedError()
-
-        if listener in self.__listeners__:
-            self.__listeners__.discard(listener)
+        self.__listeners__.discard(listener)
+        logger.debug(f"Removed listener {listener.__name__}")
 
     async def emit(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
         """
-        Emit the event, calling all registered listeners with the provided arguments.
+        Emit an event to all registered listeners.
 
-        Synchronous listeners are called directly. Asynchronous listeners are scheduled
-        to run concurrently within an `asyncio.TaskGroup`. Listener exceptions are
-        caught and ignored (consider using logging for better diagnostics).
+        Calls all registered listeners with the provided arguments.
+        Async listeners are run concurrently in an asyncio TaskGroup.
+        Exceptions in listeners are caught and ignored.
 
         Args:
-            *args: Positional arguments to pass to each listener.
-            **kwargs: Keyword arguments to pass to each listener.
+            *args: Positional arguments to pass to listeners
+            **kwargs: Keyword arguments to pass to listeners
 
         Raises:
-            EventClosedError: If the event has already been closed.
+            EventClosedError: If the event has been closed
         """
         if self.__closed__:
+            logger.error("Attempted to emit on closed event")
             raise EventClosedError()
-
-        # Wrap the internal __emit__ in a task to ensure it runs asynchronously
-        # even if called from a context where the caller might not await it immediately.
+        logger.debug("Creating emit task")
         await asyncio.create_task(self.__emit__(*args, **kwargs))
 
     def close(self) -> None:
         """
-        Close the event, preventing further listener additions or emissions.
+        Close the event and prevent further operations.
 
-        This clears all registered listeners. Attempting further operations
-        on a closed event will raise an `EventClosedError`. This operation
-        is idempotent; calling close on an already closed event does nothing.
+        After closing:
+        - No new listeners can be added
+        - Events cannot be emitted
+        - All registered listeners are cleared
+
+        This operation is idempotent - calling multiple times has no effect.
         """
         if self.__closed__:
+            logger.debug("Event already closed")
             return
 
         self.__closed__ = True
+        listener_count = len(self.__listeners__)
         self.__listeners__.clear()
+        logger.debug(f"Closed event and cleared {listener_count} listeners")
 
 
-__ON_SHUTDOWN__: Optional[Event[signal.Signals]] = None
+__ON_SHUTDOWN__: Optional[Event[signal.Signals]] = (
+    None  # Global singleton for shutdown event
+)
 
 
 def on_shutdown() -> Event[signal.Signals]:
     """
-    Get the global shutdown event instance, creating and configuring it if necessary.
+    Get or create the global shutdown event handler.
 
-    This function ensures a singleton `Event` instance is created and configured
-    to listen for typical shutdown signals (SIGHUP, SIGTERM, SIGINT). When a
-    handled signal is received, the event is emitted with the signal number
-    as an argument, and then the event is closed.
+    This function manages a singleton Event instance that handles system shutdown signals.
+    It sets up handlers for SIGHUP, SIGTERM, and SIGINT signals.
+    The event is emitted with the signal number when a shutdown signal is received.
 
-    It attempts to use `asyncio`'s loop signal handling if a loop is running,
-    otherwise falls back to the standard `signal.signal` mechanism.
+    The implementation tries to use asyncio's signal handling, falling back to standard
+    signal module if no event loop is running.
 
     Returns:
-        The singleton event instance that triggers on shutdown signals.
+        Event[signal.Signals]: The singleton shutdown event instance
 
     Raises:
-        RuntimeError: If the shutdown event fails to initialize (this should
-                      theoretically not happen under normal circumstances).
+        RuntimeError: If event initialization fails
     """
     global __ON_SHUTDOWN__
 
     if __ON_SHUTDOWN__ is None:
+        logger.debug("Initializing shutdown event")
         __ON_SHUTDOWN__ = Event[signal.Signals]()
 
-        # This inner function is the actual callback passed to the signal handler setup.
-        # It captures the specific signal it's handling.
         def handle_signal(signal_received: signal.Signals) -> Callable[..., None]:
-            """Factory to create a signal handler closure for a specific signal."""
+            """
+            Create a signal handler for a specific signal.
+
+            Factory function that creates a closure capturing the signal type.
+
+            Args:
+                signal_received: The signal number being handled
+
+            Returns:
+                Callable: The handler function for this signal
+            """
 
             def inner(*args, **kwargs) -> None:
-                """The actual signal handler function called by the system."""
-                # Ensure the event emitter is correctly typed for the cast
+                """
+                Handler function called when signal is received.
+
+                Emits the shutdown event with the signal number.
+                Attempts to use running event loop or falls back to asyncio.run().
+
+                Args:
+                    *args: Signal handler positional args (unused)
+                    **kwargs: Signal handler keyword args (unused)
+                """
+                logger.debug(f"Received signal {signal_received.name}")
                 shutdown_event = cast(Event[signal.Signals], __ON_SHUTDOWN__)
                 try:
-                    # Try to get the running asyncio loop and schedule the emit task.
                     loop = asyncio.get_running_loop()
-                    # Schedule emit to run in the loop, but don't block the signal handler
                     loop.create_task(shutdown_event.emit(signal_received))
                 except RuntimeError:
-                    # If no loop is running, run the emit coroutine directly using asyncio.run.
-                    # This might happen if the signal is received before the loop starts
-                    # or after it stops. This blocks until emit completes.
+                    logger.debug("No running loop, using asyncio.run()")
                     asyncio.run(shutdown_event.emit(signal_received))
-                finally:
-                    # Ensure the event is closed after emission attempt, regardless of loop state.
-                    # This prevents further emissions or listener modifications.
-                    if not shutdown_event.is_closed:
-                        shutdown_event.close()
 
             return inner
 
-        # Signals to handle for shutdown
         signals_to_handle = [signal.SIGHUP, signal.SIGTERM, signal.SIGINT]
+        logger.debug(
+            f"Setting up signal handlers for {[s.name for s in signals_to_handle]}"
+        )
 
         try:
-            # Attempt to use asyncio's signal handling mechanism if a loop is available
             loop = asyncio.get_running_loop()
             for s in signals_to_handle:
-                # Create a unique handler for each signal using the factory
                 loop.add_signal_handler(s, handle_signal(s))
+                logger.debug(f"Added asyncio signal handler for {s.name}")
         except RuntimeError:
-            # Fallback to standard signal handling if no asyncio loop is running
+            logger.debug("No running loop, using signal module handlers")
             for s in signals_to_handle:
-                # Create a unique handler that fits the signal.signal signature
                 signal.signal(s, handle_signal(s))
-
-    # Ensure __ON_SHUTDOWN__ is not None before returning
-    if __ON_SHUTDOWN__ is None:
-        # This path should theoretically not be reached due to the logic above,
-        # but acts as a safeguard.
-        raise RuntimeError(
-            "Failed to initialize the shutdown event."
-        )  # Or handle appropriately
+                logger.debug(f"Added signal module handler for {s.name}")
 
     return __ON_SHUTDOWN__

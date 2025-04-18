@@ -6,43 +6,31 @@
 
 `run_services` is an asynchronous context manager designed to manage the lifecycle of one or more `Service` (or `Task`) instances.
 
-```python
-from contextlib import asynccontextmanager
-from typing import List, AsyncGenerator, Awaitable, Any
-from aioservicekit import Service, run_services
-
-@asynccontextmanager
-async def run_services(
-    services: List[Service],
-) -> AsyncGenerator[Awaitable[None], Any]:
-    # ... implementation ...
-```
-
 **Purpose:**
 
-*   Simplifies starting and stopping multiple services correctly.
-*   Ensures services are stopped even if errors occur during startup or within the `async with` block.
-*   Provides a way to wait for services to complete their natural execution.
+* Simplifies starting and stopping multiple services correctly.
+* Ensures services are stopped even if errors occur during startup or within the `async with` block.
+* Provides a way to wait for services to complete their natural execution.
 
 **How it Works:**
 
-1.  **Enter (`__aenter__`)**:
-    *   Iterates through the provided `services` list.
-    *   Calls `await service.start()` on each one sequentially.
-    *   Keeps track of services that were successfully started.
-    *   If any `start()` call raises an exception, it immediately proceeds to the `finally` block to stop all services that *were* successfully started before re-raising the startup exception.
-    *   Collects the `service.wait()` awaitables for all successfully started services.
-    *   `yields` an `asyncio.gather()` awaitable that combines all the `service.wait()` calls.
+1. **Enter (`__aenter__`)**:
+    * Iterates through the provided `services` list.
+    * Calls `await service.start()` on each one sequentially.
+    * Keeps track of services that were successfully started.
+    * If any `start()` call raises an exception, it immediately proceeds to the `finally` block to stop all services that *were* successfully started before re-raising the startup exception.
+    * Collects the `service.wait()` awaitables for all successfully started services.
+    * `yields` an `asyncio.gather()` awaitable that combines all the `service.wait()` calls.
 
-2.  **Inside the `with` block**:
-    *   The user code executes.
-    *   The `yielded` awaitable can be awaited (`await waiter`). This will block until *all* the managed services reach the `STOPED` state (either by completing their work, being stopped externally, or via shutdown signals).
+2. **Inside the `with` block**:
+    * The user code executes.
+    * The `yielded` awaitable can be awaited (`await waiter`). This will block until *all* the managed services reach the `STOPED` state (either by completing their work, being stopped externally, or via shutdown signals).
 
-3.  **Exit (`__aexit__`)**:
-    *   Triggered when the `with` block finishes (normally or via an exception).
-    *   Iterates through the successfully started services *in reverse order*.
-    *   Calls `await service.stop()` on each one. Errors during `stop()` are caught and logged (to ensure subsequent services are still stopped), but not suppressed.
-    *   The original exception (if any) that caused the exit is re-raised after cleanup.
+3. **Exit (`__aexit__`)**:
+    * Triggered when the `with` block finishes (normally or via an exception).
+    * Iterates through the successfully started services *in reverse order*.
+    * Calls `service.stop()` on each one. Errors during `stop()` are caught to ensure subsequent services are still stopped.
+    * The original exception (if any) that caused the exit is re-raised after cleanup.
 
 **Example:**
 
@@ -92,31 +80,18 @@ if __name__ == "__main__":
 
 `@main` is a decorator for your primary `async def main()` application entry point function.
 
-```python
-from typing import Callable, ParamSpec, Coroutine, Any, TypeVar
-from aioservicekit import main
-
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
-
-def main(
-    fn: Callable[_P, Coroutine[Any, Any, _T]],
-) -> Callable[_P, Coroutine[Any, Any, _T]]:
-    # ... implementation ...
-```
-
 **Purpose:**
 
 Ensures that your application doesn't exit prematurely while background `asyncio.Task`s (which might have been created anywhere in your code, not necessarily managed by `Service` or `TaskGroup`) are still running.
 
 **How it Works:**
 
-1.  Calls and awaits the decorated `async def main()` function (`fn`).
-2.  Gets the result from `fn`.
-3.  Gets a set of *all* tasks currently known to the asyncio event loop (`asyncio.all_tasks()`).
-4.  Removes the task corresponding to the `@main` wrapper itself from this set.
-5.  If any other tasks remain, it calls `await asyncio.wait()` on them. This waits for these background tasks to complete.
-6.  Returns the original result from `fn`.
+1. Calls and awaits the decorated `async def main()` function (`fn`).
+2. Gets the result from `fn`.
+3. Gets a set of *all* tasks currently known to the asyncio event loop (`asyncio.all_tasks()`).
+4. Removes the task corresponding to the `@main` wrapper itself from this set.
+5. If any other tasks remain, it calls `await asyncio.wait()` on them. This waits for these background tasks to complete.
+6. Returns the original result from `fn`.
 
 **Why Use It?**
 

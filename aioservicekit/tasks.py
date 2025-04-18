@@ -4,7 +4,7 @@ from abc import abstractmethod
 from collections.abc import Coroutine, Sequence
 from typing import Any, Callable, Optional, ParamSpec
 
-from aioservicekit.service import Service
+from aioservicekit.services import Service
 
 if sys.version_info < (3, 11):
     from exceptiongroup import BaseExceptionGroup
@@ -78,6 +78,7 @@ class Task(Service):
                 tasks.create_task(asyncio.sleep(self.interval))
         except BaseExceptionGroup as err_group:
             # Handle potential multiple exceptions from the TaskGroup
+
             async with asyncio.TaskGroup() as error_tasks:
                 for err in err_group.exceptions:
                     error_tasks.create_task(self.on_error.emit(err))
