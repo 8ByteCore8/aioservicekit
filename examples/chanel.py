@@ -6,8 +6,8 @@ from aioservicekit import Channel, Service
 NUMBERS: Channel[tuple[str, int]] = Channel()
 
 
-@aioservicekit.services()
-async def Generator(name: str, limit: int):
+@aioservicekit.service()
+async def generator(name: str, limit: int):
     async with await NUMBERS.connect() as pub:
         for i in range(limit):
             await pub.send((name, i))
@@ -27,7 +27,7 @@ class Printer(Service):
 @aioservicekit.main
 async def main():
     services: list[Service] = [
-        gen := Generator("G1", 10),
+        gen := generator("G1", 10),
         Printer(dependences=[gen]),
     ]
 
