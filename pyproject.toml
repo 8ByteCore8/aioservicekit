@@ -1,10 +1,69 @@
-[build-system]
-build-backend = "setuptools.build_meta"
-requires = ["setuptools", "wheel"]
+[project]
+name = "aioservicekit"
+version = "0.6.0"
+description="A framework for creating asynchronous services. It helps to create nanoservices (like microservices, but for microservices), control their life cycle and organize communications."
+readme = {file = "README.md", content-type = "text/markdown"}
+license = "apache-2.0"
+authors = [
+  {name = "Bohdan Kushnir"},
+]
+maintainers = [
+  {name = "Bohdan Kushnir"}
+]
+keywords=[
+    "async",
+    "asyncio",
+    "service",
+    "microservice",
+    "nanoservice",
+]
+classifiers=[
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+requires-python = ">=3.10"
+dependencies = []
 
-[tool.setuptools_scm]
+[project.urls]
+Homepage = "https://github.com/8ByteCore8/aioservicekit"
+Documentation = "https://readthedocs.org"
+Repository = "https://github.com/8ByteCore8/aioservicekit.git"
+Issues = "https://github.com//8ByteCore8/aioservicekit/issues"
 
-[tool.pytest.ini_options]
-pythonpath = ["."]
+[dependency-groups]
+dev = [
+    "coverage>=7.12.0",
+    "pip-audit>=2.9.0",
+    "poethepoet>=0.38.0",
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.7",
+]
 
-requires-python = ">=3.11"
+
+[tool.poe.tasks.check-lint]
+cmd = "uv run ruff check aioservicekit/ tests/"
+help = "Check ruff errors"
+
+[tool.poe.tasks.check-format]
+cmd = "uv run ruff format --check aioservicekit/ tests/"
+help = "Check ruff formatting"
+args = [{ name = "dir", multiple = false, positional = true, default = "./" }]
+
+[tool.poe.tasks.check-audit]
+cmd = "uv run pip-audit"
+help = "Audit dependencies"
+
+[tool.poe.tasks.tests]
+cmd = "uv run pytest --cov=aioservicekit/"
+help = "Run tests"
+
+[tool.poe.tasks.check]
+sequence = ["check-lint $dir", "check-format $dir", "check-audit", "tests -vv"]
+help = "Check code before make commit"

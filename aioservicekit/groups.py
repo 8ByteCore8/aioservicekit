@@ -3,7 +3,7 @@ import sys
 from collections.abc import Coroutine
 from contextvars import Context
 from inspect import Traceback
-from typing import Any, Optional, Self
+from typing import Any, Self
 
 from aioservicekit.events import Event
 
@@ -134,8 +134,8 @@ class TaskGroup:
         self,
         coro: Coroutine[Any, Any, Any],
         *,
-        name: Optional[str] = None,
-        context: Optional[Context] = None,
+        name: str | None = None,
+        context: Context | None = None,
         canceliable: bool = True,
     ) -> asyncio.Task:
         """

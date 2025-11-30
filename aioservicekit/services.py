@@ -1,10 +1,10 @@
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
-from collections.abc import Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from contextvars import Context
 from enum import IntEnum, auto
-from typing import Any, Callable, Optional, ParamSpec, Self
+from typing import Any, ParamSpec, Self
 
 from .events import Event, on_shutdown
 from .groups import TaskGroup
@@ -41,7 +41,7 @@ class Service(ABC):
                                          from the internal TaskGroup.
     """
 
-    __main__: Optional[asyncio.Task]
+    __main__: asyncio.Task | None
     __name__: str
     __waiter__: asyncio.Event
     __dependences_waiter__: asyncio.Event
@@ -57,7 +57,7 @@ class Service(ABC):
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         dependences: Sequence["Service"] = [],
     ) -> None:
         """
@@ -411,7 +411,7 @@ class FnService(Service):
         args: tuple,
         kwargs: dict,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         dependences: Sequence[Service] = [],
     ) -> None:
         """
@@ -450,7 +450,7 @@ class FnService(Service):
 
 def service(
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
     dependences: Sequence[Service] = [],
 ) -> Callable[[Callable[_P, Coroutine[Any, Any, None]]], Callable[_P, Service]]:
     """

@@ -1,17 +1,13 @@
 from unittest.mock import AsyncMock, call
 
-import pytest
-
 from aioservicekit import Event
 
 
-@pytest.mark.asyncio
 async def test_initial_state():
     event = Event()
     assert len(event.__listeners__) == 0
 
 
-@pytest.mark.asyncio
 async def test_listeners():
     event = Event()
     mock_callback = AsyncMock()
@@ -25,7 +21,6 @@ async def test_listeners():
     assert mock_callback not in event.__listeners__
 
 
-@pytest.mark.asyncio
 async def test_emit_single_listener():
     event = Event()
     mock_callback = AsyncMock()
@@ -36,7 +31,6 @@ async def test_emit_single_listener():
     mock_callback.assert_awaited_once_with(42)
 
 
-@pytest.mark.asyncio
 async def test_emit_multiple_listeners():
     event = Event()
     mock_callbacks = [AsyncMock() for _ in range(3)]
@@ -50,7 +44,6 @@ async def test_emit_multiple_listeners():
         callback.assert_awaited_once_with(42)
 
 
-@pytest.mark.asyncio
 async def test_emit_different_values():
     event = Event()
     mock_callback = AsyncMock()
@@ -65,14 +58,12 @@ async def test_emit_different_values():
     mock_callback.assert_has_awaits([call(value) for value in test_values])
 
 
-@pytest.mark.asyncio
 async def test_emit_with_no_listeners():
     event = Event()
     # Should not raise any exceptions
     await event.emit(42)
 
 
-@pytest.mark.asyncio
 async def test_listener_exception_handling():
     event = Event()
 

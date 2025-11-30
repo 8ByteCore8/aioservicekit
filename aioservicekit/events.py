@@ -1,20 +1,16 @@
 import asyncio
 import inspect
-import logging
 import signal
-from collections.abc import Awaitable, Coroutine
+from collections.abc import Callable, Coroutine
 from typing import (
     Any,
-    Callable,
     Generic,
-    Optional,
     ParamSpec,
     Self,
     cast,
 )
 
-_P = ParamSpec("_P")
-logger = logging.getLogger(__name__)
+__P__ = ParamSpec("__P__")
 
 __all__ = [
     "EventClosedError",
@@ -32,7 +28,7 @@ class EventClosedError(Exception):
     pass
 
 
-class Event(Generic[_P]):
+class Event(Generic[__P__]):
     """
     Event class that allows registering listeners and emitting events.
 
@@ -47,7 +43,7 @@ class Event(Generic[_P]):
 
     __closed__: bool = False  # Flag indicating if event is closed
     __listeners__: set[
-        Callable[_P, None | Coroutine[Any, Any, None]]
+        Callable[__P__, None | Coroutine[Any, Any, None]]
     ]  # Set of registered listener functions
 
     def __init__(self) -> None:
@@ -55,7 +51,6 @@ class Event(Generic[_P]):
         Initialize a new Event instance.
         """
         self.__listeners__ = set()
-        logger.debug("Initialized new Event instance")
 
     def __enter__(self) -> Self:
         """
@@ -65,8 +60,10 @@ class Event(Generic[_P]):
         Returns:
             Self: The event instance itself.
         """
-        logger.debug("Entering Event context")
         return self
+
+    async def __aenter__(self) -> Self:
+        return self.__enter__()
 
     def __exit__(
         self, et: type[Exception], exc: Exception, tb: inspect.Traceback
@@ -79,13 +76,31 @@ class Event(Generic[_P]):
             exc: Exception instance if an error occurred
             tb: Traceback if an error occurred
         """
-        logger.debug("Exiting Event context")
         self.close()
         if et:
-            logger.error(f"Exception occurred in Event context: {exc}", exc_info=exc)
             raise exc
 
-    async def __emit__(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
+    async def __aexit__(
+        self, et: type[Exception], exc: Exception, tb: inspect.Traceback
+    ) -> None:
+        """
+        Exit context manager and ensure event is closed.
+
+        Args:
+            et: Exception type if an error occurred
+            exc: Exception instance if an error occurred
+            tb: Traceback if an error occurred
+        """
+        return self.__exit__(et, exc, tb)
+
+    @staticmethod
+    async def __async_emit_wrapper__(coro: Coroutine[Any, Any, None]) -> None:
+        try:
+            await coro
+        except Exception:
+            pass
+
+    async def __emit__(self, *args: __P__.args, **kwargs: __P__.kwargs) -> None:
         """
         Internal method to execute all registered listeners.
 
@@ -97,27 +112,14 @@ class Event(Generic[_P]):
             *args: Positional arguments to pass to listeners
             **kwargs: Keyword arguments to pass to listeners
         """
-        logger.debug(f"Emitting event to {len(self.__listeners__)} listeners")
         async with asyncio.TaskGroup() as group:
             for listener in self.__listeners__:
                 try:
                     res = listener(*args, **kwargs)
                     if inspect.isawaitable(res):
-                        logger.debug(f"Running async listener {listener.__name__}")
-
-                        async def __emit_wrapper__(coro: Awaitable) -> None:
-                            try:
-                                await coro
-                            except Exception as e:
-                                logger.error(
-                                    f"Error in async listener: {e}", exc_info=e
-                                )
-
-                        group.create_task(__emit_wrapper__(res))
-                    else:
-                        logger.debug(f"Ran sync listener {listener.__name__}")
-                except Exception as e:
-                    logger.error(f"Error in listener: {e}", exc_info=e)
+                        group.create_task(self.__async_emit_wrapper__(res))
+                except Exception:
+                    pass
 
     @property
     def is_closed(self) -> bool:
@@ -130,7 +132,7 @@ class Event(Generic[_P]):
         return self.__closed__
 
     def add_listener(
-        self, listener: Callable[_P, None | Coroutine[Any, Any, None]]
+        self, listener: Callable[__P__, None | Coroutine[Any, Any, None]]
     ) -> None:
         """
         Register a new listener function or coroutine.
@@ -145,15 +147,18 @@ class Event(Generic[_P]):
             EventClosedError: If the event has been closed
         """
         if self.__closed__:
-            logger.error("Attempted to add listener to closed event")
             raise EventClosedError()
 
         if callable(listener):
             self.__listeners__.add(listener)
-            logger.debug(f"Added listener {listener.__name__}")
+
+    def __iadd__(
+        self, listener: Callable[__P__, None | Coroutine[Any, Any, None]]
+    ) -> None:
+        self.add_listener(listener)
 
     def remove_listener(
-        self, listener: Callable[_P, None | Coroutine[Any, Any, None]]
+        self, listener: Callable[__P__, None | Coroutine[Any, Any, None]]
     ) -> None:
         """
         Remove a previously registered listener.
@@ -165,9 +170,23 @@ class Event(Generic[_P]):
             listener: The listener function/coroutine to remove
         """
         self.__listeners__.discard(listener)
-        logger.debug(f"Removed listener {listener.__name__}")
 
-    async def emit(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
+    def __isub__(
+        self, listener: Callable[__P__, None | Coroutine[Any, Any, None]]
+    ) -> None:
+        self.remove_listener(listener)
+
+    def has_listener(
+        self, listener: Callable[__P__, None | Coroutine[Any, Any, None]]
+    ) -> bool:
+        return listener in self.__listeners__
+
+    def __contains__(
+        self, listener: Callable[__P__, None | Coroutine[Any, Any, None]]
+    ) -> bool:
+        return self.has_listener(listener)
+
+    async def emit(self, *args: __P__.args, **kwargs: __P__.kwargs) -> None:
         """
         Emit an event to all registered listeners.
 
@@ -183,9 +202,7 @@ class Event(Generic[_P]):
             EventClosedError: If the event has been closed
         """
         if self.__closed__:
-            logger.error("Attempted to emit on closed event")
             raise EventClosedError()
-        logger.debug("Creating emit task")
         await asyncio.create_task(self.__emit__(*args, **kwargs))
 
     def close(self) -> None:
@@ -200,16 +217,13 @@ class Event(Generic[_P]):
         This operation is idempotent - calling multiple times has no effect.
         """
         if self.__closed__:
-            logger.debug("Event already closed")
             return
 
         self.__closed__ = True
-        listener_count = len(self.__listeners__)
         self.__listeners__.clear()
-        logger.debug(f"Closed event and cleared {listener_count} listeners")
 
 
-__ON_SHUTDOWN__: Optional[Event[signal.Signals]] = (
+__ON_SHUTDOWN__: Event[signal.Signals] | None = (
     None  # Global singleton for shutdown event
 )
 
@@ -234,7 +248,6 @@ def on_shutdown() -> Event[signal.Signals]:
     global __ON_SHUTDOWN__
 
     if __ON_SHUTDOWN__ is None:
-        logger.debug("Initializing shutdown event")
         __ON_SHUTDOWN__ = Event[signal.Signals]()
 
         def handle_signal(signal_received: signal.Signals) -> Callable[..., None]:
@@ -261,31 +274,23 @@ def on_shutdown() -> Event[signal.Signals]:
                     *args: Signal handler positional args (unused)
                     **kwargs: Signal handler keyword args (unused)
                 """
-                logger.debug(f"Received signal {signal_received.name}")
                 shutdown_event = cast(Event[signal.Signals], __ON_SHUTDOWN__)
                 try:
                     loop = asyncio.get_running_loop()
                     loop.create_task(shutdown_event.emit(signal_received))
                 except RuntimeError:
-                    logger.debug("No running loop, using asyncio.run()")
                     asyncio.run(shutdown_event.emit(signal_received))
 
             return inner
 
         signals_to_handle = [signal.SIGHUP, signal.SIGTERM, signal.SIGINT]
-        logger.debug(
-            f"Setting up signal handlers for {[s.name for s in signals_to_handle]}"
-        )
 
         try:
             loop = asyncio.get_running_loop()
             for s in signals_to_handle:
                 loop.add_signal_handler(s, handle_signal(s))
-                logger.debug(f"Added asyncio signal handler for {s.name}")
         except RuntimeError:
-            logger.debug("No running loop, using signal module handlers")
             for s in signals_to_handle:
                 signal.signal(s, handle_signal(s))
-                logger.debug(f"Added signal module handler for {s.name}")
 
     return __ON_SHUTDOWN__

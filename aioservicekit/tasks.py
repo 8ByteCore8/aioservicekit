@@ -1,8 +1,8 @@
 import asyncio
 import sys
 from abc import abstractmethod
-from collections.abc import Coroutine, Sequence
-from typing import Any, Callable, Optional, ParamSpec
+from collections.abc import Callable, Coroutine, Sequence
+from typing import Any, ParamSpec
 
 from aioservicekit.services import Service
 
@@ -30,7 +30,7 @@ class Task(Service):
         self,
         interval: float,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         dependences: Sequence[Service] = [],
     ) -> None:
         """
@@ -125,7 +125,7 @@ class FnTask(Task):
         kwargs: dict,
         interval: float,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         dependences: Sequence[Service] = [],
     ) -> None:
         """
@@ -163,7 +163,7 @@ class FnTask(Task):
 def task(
     interval: float,
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
     dependences: Sequence[Service] = [],
 ) -> Callable[[Callable[_P, Coroutine[Any, Any, None]]], Callable[_P, Task]]:
     """

@@ -1,13 +1,15 @@
 import asyncio
+import sys
 from unittest.mock import AsyncMock
 
-import pytest
-from exceptiongroup import BaseExceptionGroup
+from pytest import raises
+
+if sys.version_info < (3, 11):
+    from exceptiongroup import BaseExceptionGroup
 
 from aioservicekit.groups import TaskGroup
 
 
-@pytest.mark.asyncio
 async def test_initial_state():
     group = TaskGroup()
     assert len(group.__tasks__) == 0
@@ -16,7 +18,6 @@ async def test_initial_state():
     assert group.__error_tolerance__ is False
 
 
-@pytest.mark.asyncio
 async def test_create_task():
     async def dummy_coro():
         return 42
@@ -33,7 +34,6 @@ async def test_create_task():
     assert task not in group.__tasks__  # Task should be removed after completion
 
 
-@pytest.mark.asyncio
 async def test_create_uncancelable_task():
     async def dummy_coro():
         return 42
@@ -50,7 +50,6 @@ async def test_create_uncancelable_task():
     assert task not in group.__uncanceliable_tasks__
 
 
-@pytest.mark.asyncio
 async def test_error_handling_without_tolerance():
     error_handler = AsyncMock()
 
@@ -67,7 +66,7 @@ async def test_error_handling_without_tolerance():
     group.create_task(failing_coro())
     good_task = group.create_task(good_coro())
 
-    with pytest.raises(BaseExceptionGroup) as exc_info:
+    with raises(BaseExceptionGroup) as exc_info:
         await group.wait()
 
     assert len(exc_info.value.exceptions) == 1
@@ -78,7 +77,6 @@ async def test_error_handling_without_tolerance():
     assert good_task.cancelled()
 
 
-@pytest.mark.asyncio
 async def test_error_handling_with_tolerance():
     error_handler = AsyncMock()
 
@@ -102,7 +100,6 @@ async def test_error_handling_with_tolerance():
     assert good_task.result() == 42
 
 
-@pytest.mark.asyncio
 async def test_context_manager():
     results = []
 
@@ -117,7 +114,6 @@ async def test_context_manager():
     assert results == [42, 42]
 
 
-@pytest.mark.asyncio
 async def test_cancel():
     cancel_count = 0
 
@@ -148,7 +144,6 @@ async def test_cancel():
     assert uncancelable_task.result() == 42  # Uncancelable task should complete
 
 
-@pytest.mark.asyncio
 async def test_reset_errors():
     async def failing_coro():
         raise ValueError("test error")

@@ -1,8 +1,6 @@
 import asyncio
 from unittest.mock import AsyncMock, call
 
-import pytest
-
 from aioservicekit.services import Service, ServiceState, service
 
 
@@ -16,7 +14,6 @@ class MockService(Service):
         await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_initial_state():
     svc = MockService()
     assert svc.state == ServiceState.STOPED
@@ -24,13 +21,11 @@ async def test_initial_state():
     assert not svc.run
 
 
-@pytest.mark.asyncio
 async def test_custom_name():
     svc = MockService(name="CustomName")
     assert svc.name == "CustomName"
 
 
-@pytest.mark.asyncio
 async def test_basic_lifecycle():
     svc = MockService()
     state_change_listener = AsyncMock()
@@ -54,7 +49,6 @@ async def test_basic_lifecycle():
     )
 
 
-@pytest.mark.asyncio
 async def test_service_with_dependencies():
     dep_service = MockService(name="Dependency")
     main_service = MockService(name="Main", dependences=[dep_service])
@@ -73,7 +67,6 @@ async def test_service_with_dependencies():
     assert main_service.state == ServiceState.STOPED
 
 
-@pytest.mark.asyncio
 async def test_service_error_handling():
     error_mock = AsyncMock()
     svc = MockService()
@@ -91,7 +84,6 @@ async def test_service_error_handling():
     svc.stop()
 
 
-@pytest.mark.asyncio
 async def test_function_service():
     work_mock = AsyncMock()
 
@@ -110,7 +102,6 @@ async def test_function_service():
     await svc.wait()
 
 
-@pytest.mark.asyncio
 async def test_service_hooks():
     start_mock = AsyncMock()
     stop_mock = AsyncMock()
@@ -131,7 +122,6 @@ async def test_service_hooks():
     stop_mock.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_task_creation():
     svc = MockService()
     await svc.start()
