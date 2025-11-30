@@ -52,6 +52,18 @@ class Event(Generic[__P__]):
         """
         self.__listeners__ = set()
 
+    def __call__(
+        self, *args: __P__.args, **kwargs: __P__.kwargs
+    ) -> Coroutine[Any, Any, None]:
+        """
+        Emit the event with the given arguments.
+
+        Args:
+            *args: Positional arguments to pass to listeners
+            **kwargs: Keyword arguments to pass to listeners
+        """
+        return self.emit(*args, **kwargs)
+
     def __enter__(self) -> Self:
         """
         Enter context manager.
