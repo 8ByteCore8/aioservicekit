@@ -93,6 +93,9 @@ class Event(Generic[__P__]):
         """
         return self.__exit__(et, exc, tb)
 
+    def __len__(self) -> int:
+        return len(self.__listeners__)
+
     @staticmethod
     async def __async_emit_wrapper__(coro: Coroutine[Any, Any, None]) -> None:
         try:
