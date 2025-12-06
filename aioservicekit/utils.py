@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Iterable
 from contextlib import asynccontextmanager
 from typing import Any, ParamSpec, TypeVar, cast
 
@@ -69,7 +69,7 @@ def main(
 
 @asynccontextmanager
 async def run_services(
-    services: list[Service],
+    services: Iterable[Service],
 ) -> AsyncGenerator[Awaitable[None], Any]:
     """
     Asynchronous context manager to manage the lifecycle of a list of services.
